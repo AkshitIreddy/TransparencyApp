@@ -1,0 +1,4 @@
+# make nuitka is installed
+pip install Nuitka
+# then run this
+python -m nuitka --disable-console TransparencyApp.py
