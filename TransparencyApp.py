@@ -9,7 +9,6 @@ import pystray
 from PIL import Image, ImageTk
 import threading
 import ctypes
-import win32gui
 import win32con
 
 def is_file_explorer_window(hwnd):
@@ -31,10 +30,6 @@ def set_transparency_for_all_file_explorer_windows(transparency_level):
         return True
 
     win32gui.EnumWindows(enum_file_explorer_windows, None)
-
-# Set transparency level (0 to 255, where 0 is completely transparent and 255 is opaque)
-# Set transparency for all File Explorer windows
-# set_transparency_for_all_file_explorer_windows(200)
 
 def set_transparency_for_app(app_name, transparency_level):
     """Set transparency level for all windows of the specified application."""
@@ -61,8 +56,35 @@ def set_transparency_for_app(app_name, transparency_level):
     # Enumerate all top-level windows
     win32gui.EnumWindows(enum_windows_proc, None)
 
-# Example usage: Set transparency level for all Notepad windows
-# set_transparency_for_app("visual studio code", 255)  # Adjust transparency level as needed
+def is_visible_window(hwnd):
+    """Check if the window is visible, not minimized, and not a system-level window."""
+    if not win32gui.IsWindowVisible(hwnd):
+        return False
+    if win32gui.IsIconic(hwnd):
+        return False
+    if win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE) & win32con.WS_EX_TOOLWINDOW:
+        return False
+    return True
+
+def set_transparency(hwnd, transparency_level):
+    """Set the transparency level for the window identified by hwnd."""
+    style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+    win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, style | win32con.WS_EX_LAYERED)
+    ctypes.windll.user32.SetLayeredWindowAttributes(hwnd, 0, transparency_level, win32con.LWA_ALPHA)
+
+def get_open_windows():
+    """Get a list of currently open windows with visible titles and not considered system-level."""
+    open_windows = []
+    
+    def enum_windows_proc(hwnd, lParam):
+        if is_visible_window(hwnd):
+            window_title = win32gui.GetWindowText(hwnd)
+            if window_title and window_title not in EXCLUDE_TITLES:
+                open_windows.append(hwnd)
+        return True
+    
+    win32gui.EnumWindows(enum_windows_proc, None)
+    return open_windows
 
 class TransparencyApp:
 
@@ -91,26 +113,31 @@ class TransparencyApp:
         # Place the background image on the canvas
         self.canvas.create_image(0, 0, anchor="nw", image=self.background_photo)
 
+        # Checkbox for Ultra Mode
+        self.ultra_mode_var = tk.BooleanVar()
+        self.ultra_mode_checkbox = tk.Checkbutton(master, text="Ultra Mode", variable=self.ultra_mode_var, command=self.update_ultra_mode)
+        self.ultra_mode_checkbox_window = self.canvas.create_window(10, 10, anchor="nw", window=self.ultra_mode_checkbox)
+
         # Label to display the number of open windows
         self.explain = tk.Label(master, text="Windows List", font=("Arial", 14))
-        self.explain_window = self.canvas.create_window(10, 10, anchor="nw", window=self.explain)
+        self.explain_window = self.canvas.create_window(10, 50, anchor="nw", window=self.explain)
 
         # Dropdown list to display the titles of open windows
         self.window_dropdown = ttk.Combobox(master, state="readonly", font=("Arial", 14))
-        self.window_dropdown_window = self.canvas.create_window(10, 50, anchor="nw", window=self.window_dropdown)
+        self.window_dropdown_window = self.canvas.create_window(10, 90, anchor="nw", window=self.window_dropdown)
 
         # Text box for user input
         self.text_entry = tk.Entry(master, font=("Arial", 14))
-        self.text_entry_window = self.canvas.create_window(10, 90, anchor="nw", window=self.text_entry)
+        self.text_entry_window = self.canvas.create_window(10, 130, anchor="nw", window=self.text_entry)
         self.text_entry.bind("<Return>", self.save_to_json)
         
         # Label to display the list of entered texts
         self.list_label = tk.Label(master, text="Windows in List:", font=("Arial", 14))
-        self.list_label_window = self.canvas.create_window(10, 130, anchor="nw", window=self.list_label)
+        self.list_label_window = self.canvas.create_window(10, 170, anchor="nw", window=self.list_label)
 
         # Frame to contain sliders
         self.slider_frame = tk.Frame(master)
-        self.slider_frame_window = self.canvas.create_window(10, 170, anchor="nw", window=self.slider_frame)
+        self.slider_frame_window = self.canvas.create_window(10, 210, anchor="nw", window=self.slider_frame)
         
         # Populate dropdown list with window titles
         self.populate_window_dropdown()
@@ -120,6 +147,9 @@ class TransparencyApp:
 
         # Bind the close event to the window
         master.protocol("WM_DELETE_WINDOW", self.minimize_to_tray)
+
+        # Initialize previous transparency settings
+        self.previous_transparency = {}
 
         # Start the periodic transparency function in a separate thread
         self.running = True
@@ -132,16 +162,40 @@ class TransparencyApp:
     def transparency_applier_for_all_selected_windows(self):
         while self.running:
             try:
+                window_preset_exists = False
                 with open("data.json", "r") as f:
                     data = json.load(f)
-                    if data:
+                    if self.ultra_mode_var.get():
+                        focused_hwnd = win32gui.GetForegroundWindow()
+                        focused_window = win32gui.GetWindowText(focused_hwnd)
                         for window, value in data["windows"].items():
-                            set_transparency_for_app(window, value)
+                            if window.lower() in focused_window.lower() and value != 255:
+                                self.apply_ultra_mode(value)
+                                window_preset_exists = True
+                                continue
+                        if not window_preset_exists:
+                            self.apply_ultra_mode(180)
+                    else:
+                        if data:
+                            for window, value in data["windows"].items():
+                                set_transparency_for_app(window, value)
             except:
                 continue
-            # Sleep for one second 
-            threading.Event().wait(1)
 
+            threading.Event().wait(0.1)
+
+    def apply_ultra_mode(self, level):
+        open_windows = get_open_windows()
+        focused_hwnd = win32gui.GetForegroundWindow()
+        
+        for hwnd in open_windows:
+            if hwnd == focused_hwnd:
+                set_transparency(hwnd, level)  # Adjust transparency level for focused window
+            else:
+                set_transparency(hwnd, 0)  # Make other windows transparent
+        
+        self.previous_transparency = {hwnd: win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE) for hwnd in open_windows}
+    
     def update_window_titles(self):
         while self.running:
             self.populate_window_dropdown()
@@ -246,10 +300,23 @@ class TransparencyApp:
         
         with open("data.json", "w") as f:
             json.dump(data, f, indent=4)
-            
+    
+    def update_ultra_mode(self):
+        if not self.ultra_mode_var.get():
+            # Restore previous transparency settings
+            open_windows = get_open_windows()
+            for hwnd in open_windows:
+                if hwnd in self.previous_transparency:
+                    style = self.previous_transparency[hwnd]
+                    win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, style | win32con.WS_EX_LAYERED)
+                    ctypes.windll.user32.SetLayeredWindowAttributes(hwnd, 0, 255, win32con.LWA_ALPHA)
+            self.previous_transparency.clear()
+
 def main():
     root = tk.Tk()
     app = TransparencyApp(root)
     root.mainloop()
 
+EXCLUDE_TITLES = ["Windows Input Experience", "Settings", "Transparency App"]  # Modify as needed
+     
 main()
