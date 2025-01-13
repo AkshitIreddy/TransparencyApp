@@ -2,3 +2,4 @@
 pip install Nuitka
 # then run this
 python -m nuitka --disable-console TransparencyApp.py
+python -m nuitka --standalone --onefile --enable-plugin=tk-inter --windows-disable-console TransparencyApp.py
