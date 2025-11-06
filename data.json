@@ -1,5 +1,10 @@
 {
     "windows": {
-        "File Explorer": 255
+        "File Explorer": 255,
+        ".ppt": 255,
+        ".docx": 255,
+        "chrome": 255,
+        "brave": 255,
+        "cursor": 255
     }
 }

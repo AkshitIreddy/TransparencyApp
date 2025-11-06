@@ -11,6 +11,56 @@ import threading
 import ctypes
 import win32con
 import win32api
+from datetime import datetime
+import traceback
+import os
+
+# Logging system - tracks logged messages to avoid duplicates
+_logged_messages = set()
+_log_lock = threading.Lock()
+
+def log_message(level, message, exception=None):
+    """Log errors and important messages, avoiding duplicates."""
+    with _log_lock:
+        # Create a signature for the message to detect duplicates
+        # For exceptions, use exception type and message
+        if exception:
+            sig = f"{level}:{type(exception).__name__}:{str(exception)[:100]}"
+        else:
+            sig = f"{level}:{message[:100]}"
+        
+        # Only log if we haven't seen this exact message before
+        if sig in _logged_messages:
+            return
+        
+        _logged_messages.add(sig)
+        
+        try:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open("error_log.txt", "a", encoding="utf-8") as f:
+                f.write(f"[{timestamp}] {level}: {message}\n")
+                if exception:
+                    f.write(f"  Exception: {type(exception).__name__}: {str(exception)}\n")
+                    f.write(f"  Traceback:\n")
+                    for line in traceback.format_exc().split('\n'):
+                        if line.strip():
+                            f.write(f"    {line}\n")
+                f.write("\n")
+        except Exception as e:
+            # If we can't write to log file, at least print
+            print(f"Failed to write to log: {e}")
+
+def log_error(message, exception=None):
+    """Log an error message."""
+    log_message("ERROR", message, exception)
+
+def log_warning(message):
+    """Log a warning message."""
+    log_message("WARNING", message)
+
+def log_info(message):
+    """Log an info message."""
+    log_message("INFO", message)
 
 def is_file_explorer_window(hwnd):
     """Check if the window represented by hwnd is a File Explorer window."""
@@ -99,6 +149,8 @@ def get_open_windows():
 class TransparencyApp:
 
     def __init__(self, master):
+        # Flag to track if we should quit
+        self.should_quit = False
         self.master = master
         master.title("Transparency App")
         
@@ -144,10 +196,15 @@ class TransparencyApp:
         self.dimming_slider.set(128)  # Default to moderate dimming (max is 200 to prevent full blackout)
         self.dimming_slider_window = self.canvas.create_window(10, 65, anchor="nw", window=self.dimming_slider)
         
-        # Initialize screen dimming overlay window
+        # Initialize screen dimming overlay window with defaults
+        # Screen dimming settings are NOT loaded from JSON - always start with defaults
         self.dimming_overlay_hwnd = None
-        self.dimming_intensity = 128
-        self.dimming_enabled = False
+        self.dimming_intensity = 128  # Default intensity
+        self.dimming_enabled = False  # Default disabled
+        
+        # Set the slider to match defaults
+        self.dimming_slider.set(128)
+        self.screen_dimming_var.set(False)
 
         # Checkbox for Ultra Mode
         self.ultra_mode_var = tk.BooleanVar()
@@ -183,6 +240,9 @@ class TransparencyApp:
 
         # Bind the close event to the window
         master.protocol("WM_DELETE_WINDOW", self.minimize_to_tray)
+        
+        # Schedule periodic check for quit flag (for tray menu quit)
+        self.check_quit_flag()
 
         # Initialize previous transparency settings
         self.previous_transparency = {}
@@ -229,41 +289,127 @@ class TransparencyApp:
                 self.canvas.coords(self.background_image_id, 0, 0)
 
     def transparency_applier_for_all_selected_windows(self):
+        consecutive_errors = 0
+        max_consecutive_errors = 10
+        
         while self.running:
             try:
                 window_preset_exists = False
-                with open("data.json", "r") as f:
-                    data = json.load(f)
+                
+                # Try to read data.json with timeout protection
+                try:
+                    with open("data.json", "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    
+                    # Ensure data has the expected structure
+                    if "windows" not in data:
+                        if consecutive_errors == 0:
+                            log_warning("data.json missing 'windows' key, creating default structure")
+                        data = {"windows": {}}
+                    elif not isinstance(data["windows"], dict):
+                        if consecutive_errors == 0:
+                            log_warning("data.json 'windows' is not a dict, resetting to empty dict")
+                        data["windows"] = {}
+                    
+                    # Remove screen_dimmer if it exists (we don't use it)
+                    if "screen_dimmer" in data:
+                        del data["screen_dimmer"]
+                        # Save cleaned version back
+                        try:
+                            with open("data.json", "w", encoding="utf-8") as f:
+                                json.dump(data, f, indent=4)
+                            log_info("Removed screen_dimmer section from data.json")
+                        except:
+                            pass
+                    
+                    consecutive_errors = 0  # Reset on success
+                    
                     if self.ultra_mode_var.get():
                         focused_hwnd = win32gui.GetForegroundWindow()
-                        focused_window = win32gui.GetWindowText(focused_hwnd)
-                        for window, value in data["windows"].items():
-                            if window.lower() in focused_window.lower() and value != 255:
-                                self.apply_ultra_mode(value)
-                                window_preset_exists = True
-                                continue
-                        if not window_preset_exists:
-                            self.apply_ultra_mode(180)
+                        if focused_hwnd:
+                            focused_window = win32gui.GetWindowText(focused_hwnd)
+                            for window, value in data["windows"].items():
+                                if window.lower() in focused_window.lower() and value != 255:
+                                    self.apply_ultra_mode(value)
+                                    window_preset_exists = True
+                                    continue
+                            if not window_preset_exists:
+                                self.apply_ultra_mode(180)
                     else:
-                        if data:
+                        if data and data.get("windows"):
                             for window, value in data["windows"].items():
                                 set_transparency_for_app(window, value, self.modified_windows)
-            except:
-                continue
+                            
+                except json.JSONDecodeError as e:
+                    consecutive_errors += 1
+                    if consecutive_errors == 1:
+                        log_error(f"data.json is corrupted (JSON decode error): {str(e)[:200]}", e)
+                        # Create a backup and reset data.json
+                        try:
+                            if os.path.exists("data.json"):
+                                import shutil
+                                shutil.copy("data.json", "data.json.backup")
+                            with open("data.json", "w", encoding="utf-8") as f:
+                                json.dump({"windows": {}}, f, indent=4)
+                            log_info("Created backup and reset corrupted data.json")
+                        except Exception as backup_error:
+                            log_error("Failed to backup/reset corrupted data.json", backup_error)
+                    
+                except FileNotFoundError:
+                    consecutive_errors += 1
+                    if consecutive_errors == 1:
+                        log_info("data.json not found, creating default")
+                        try:
+                            with open("data.json", "w", encoding="utf-8") as f:
+                                json.dump({"windows": {}}, f, indent=4)
+                        except Exception as create_error:
+                            log_error("Failed to create default data.json", create_error)
+                    
+                except PermissionError as e:
+                    consecutive_errors += 1
+                    if consecutive_errors == 1:
+                        log_error("Permission denied accessing data.json", e)
+                    
+                except Exception as e:
+                    consecutive_errors += 1
+                    if consecutive_errors <= 3:  # Log first 3 unknown errors
+                        log_error(f"Unexpected error reading data.json: {str(e)[:200]}", e)
+                    
+                # If we have too many consecutive errors, slow down to prevent tight loop
+                if consecutive_errors > max_consecutive_errors:
+                    threading.Event().wait(1.0)  # Wait longer on repeated errors
+                    consecutive_errors = 0  # Reset counter after wait
+                
+            except Exception as e:
+                consecutive_errors += 1
+                if consecutive_errors <= 3:
+                    log_error(f"Critical error in transparency_applier thread: {str(e)[:200]}", e)
 
             threading.Event().wait(0.1)
 
     def apply_ultra_mode(self, level):
-        open_windows = get_open_windows()
-        focused_hwnd = win32gui.GetForegroundWindow()
-        
-        for hwnd in open_windows:
-            if hwnd == focused_hwnd:
-                set_transparency(hwnd, level, self.modified_windows)  # Adjust transparency level for focused window
-            else:
-                set_transparency(hwnd, 0, self.modified_windows)  # Make other windows transparent
-        
-        self.previous_transparency = {hwnd: win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE) for hwnd in open_windows if win32gui.IsWindow(hwnd)}
+        try:
+            open_windows = get_open_windows()
+            focused_hwnd = win32gui.GetForegroundWindow()
+            
+            for hwnd in open_windows:
+                try:
+                    if hwnd == focused_hwnd:
+                        set_transparency(hwnd, level, self.modified_windows)  # Adjust transparency level for focused window
+                    else:
+                        set_transparency(hwnd, 0, self.modified_windows)  # Make other windows transparent
+                except Exception as e:
+                    # Individual window errors shouldn't stop the process
+                    if not hasattr(self, '_ultra_mode_window_error_logged'):
+                        log_error(f"Error applying transparency to window in ultra mode: {str(e)[:200]}", e)
+                        self._ultra_mode_window_error_logged = True
+            
+            try:
+                self.previous_transparency = {hwnd: win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE) for hwnd in open_windows if win32gui.IsWindow(hwnd)}
+            except Exception as e:
+                log_error(f"Error saving previous transparency state: {str(e)[:200]}", e)
+        except Exception as e:
+            log_error(f"Critical error in apply_ultra_mode: {str(e)[:200]}", e)
     
     def update_window_titles(self):
         while self.running:
@@ -289,24 +435,66 @@ class TransparencyApp:
         # Use after_idle to ensure it runs in the main thread
         self.master.after_idle(self.master.deiconify)  # Show the window
         
-    def quit_window(self, icon, item):
+    def check_quit_flag(self):
+        """Periodically check if quit was requested from tray menu."""
+        if self.should_quit:
+            self.cleanup_and_exit()
+        else:
+            # Check again in 100ms
+            self.master.after(100, self.check_quit_flag)
+    
+    def cleanup_and_exit(self):
+        """Perform cleanup and exit the application."""
+        log_info("Cleaning up and exiting application")
         self.running = False
+        
         # Restore all window transparency
-        self.restore_all_windows_transparency()
+        try:
+            self.restore_all_windows_transparency()
+        except Exception as e:
+            log_error("Error restoring window transparency during quit", e)
+        
         # Clean up dimming overlay
-        if self.dimming_overlay_hwnd is not None:
-            if win32gui.IsWindow(self.dimming_overlay_hwnd):
-                win32gui.DestroyWindow(self.dimming_overlay_hwnd)
-        icon.stop()
-        self.icon = None  # Reset icon reference
+        try:
+            if self.dimming_overlay_hwnd is not None:
+                if win32gui.IsWindow(self.dimming_overlay_hwnd):
+                    win32gui.DestroyWindow(self.dimming_overlay_hwnd)
+        except Exception as e:
+            log_error("Error destroying dimming overlay during quit", e)
+        
+        # Stop the tray icon if it exists
+        try:
+            if hasattr(self, 'icon') and self.icon is not None:
+                self.icon.stop()
+                self.icon = None
+        except Exception as e:
+            log_error("Error stopping tray icon", e)
+        
         # Give threads time to exit
         import time
-        time.sleep(0.5)
-        # Schedule quit on main thread
-        self.master.after(0, self.master.quit)
-        self.master.after(100, self.master.destroy)
+        time.sleep(0.3)
+        
+        # Destroy window and exit
+        try:
+            self.master.quit()
+            self.master.destroy()
+        except:
+            pass
+        
         import os
-        self.master.after(200, lambda: os._exit(0))  # Force exit to ensure all threads terminate
+        time.sleep(0.1)
+        os._exit(0)
+    
+    def quit_window(self, icon, item):
+        """Called when Quit is selected from tray menu."""
+        log_info("Quit requested from tray menu")
+        # Set flag that will be picked up by check_quit_flag
+        self.should_quit = True
+        # Also stop the icon to close the menu
+        try:
+            icon.stop()
+        except:
+            pass
 
     def populate_window_dropdown(self):
         window_titles = []
@@ -323,13 +511,52 @@ class TransparencyApp:
 
     def load_data_from_json(self):
         try:
-            with open("data.json", "r") as f:
+            with open("data.json", "r", encoding="utf-8") as f:
                 data = json.load(f)
-                if not data:
-                    self.display_empty_message()
-                else:
-                    self.display_sliders(data)
+            
+            # Remove screen_dimmer if present (we don't use it)
+            if "screen_dimmer" in data:
+                del data["screen_dimmer"]
+                # Save cleaned version
+                try:
+                    with open("data.json", "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=4)
+                    log_info("Removed screen_dimmer section from data.json")
+                except Exception as e:
+                    log_error("Failed to save cleaned data.json", e)
+            
+            # Ensure windows key exists
+            if "windows" not in data:
+                data["windows"] = {}
+            elif not isinstance(data.get("windows"), dict):
+                log_warning("data.json 'windows' is not a dict, resetting")
+                data["windows"] = {}
+            
+            if not data.get("windows"):
+                self.display_empty_message()
+            else:
+                self.display_sliders(data)
+                
+        except json.JSONDecodeError as e:
+            log_error("data.json is corrupted (JSON decode error) in load_data_from_json", e)
+            # Create backup and reset
+            try:
+                if os.path.exists("data.json"):
+                    import shutil
+                    shutil.copy("data.json", "data.json.backup")
+                with open("data.json", "w", encoding="utf-8") as f:
+                    json.dump({"windows": {}}, f, indent=4)
+                log_info("Created backup and reset corrupted data.json")
+            except Exception as backup_error:
+                log_error("Failed to backup/reset corrupted data.json", backup_error)
+            self.display_empty_message()
+            
         except FileNotFoundError:
+            log_info("data.json not found on startup, will be created on first save")
+            self.display_empty_message()
+            
+        except Exception as e:
+            log_error(f"Error loading data.json: {str(e)[:200]}", e)
             self.display_empty_message()
         
     def display_empty_message(self):
@@ -348,21 +575,45 @@ class TransparencyApp:
         
     def save_to_json(self, event):
         new_text = self.text_entry.get()
+        if not new_text.strip():
+            return
+        
         self.text_entry.delete(0, tk.END)  # Clear the entry box
         
         # Read existing data
         try:
-            with open("data.json", "r") as f:
+            with open("data.json", "r", encoding="utf-8") as f:
                 data = json.load(f)
+            
+            # Ensure structure is correct
+            if "windows" not in data:
+                data["windows"] = {}
+            elif not isinstance(data.get("windows"), dict):
+                data["windows"] = {}
+            
+            # Remove screen_dimmer if present (we don't save it)
+            if "screen_dimmer" in data:
+                del data["screen_dimmer"]
         except FileNotFoundError:
+            data = {"windows": {}}
+        except json.JSONDecodeError as e:
+            log_error("data.json corrupted when saving new window", e)
+            # Try to recover by creating new structure
+            data = {"windows": {}}
+        except Exception as e:
+            log_error(f"Error reading data.json before save: {str(e)[:200]}", e)
             data = {"windows": {}}
         
         # Add new text to the dictionary
         data["windows"][new_text] = 255
         
-        # Write updated data back to the file
-        with open("data.json", "w") as f:
-            json.dump(data, f, indent=4)
+        # Write updated data back to the file (ensure screen_dimmer is not included)
+        try:
+            with open("data.json", "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4)
+        except Exception as e:
+            log_error(f"Failed to save data.json: {str(e)[:200]}", e)
+            return
         
         # Update the list display
         self.update_list_display(data["windows"])
@@ -381,15 +632,35 @@ class TransparencyApp:
     def update_json_value(self, window, value):
         # Update the JSON value corresponding to the slider
         try:
-            with open("data.json", "r") as f:
+            with open("data.json", "r", encoding="utf-8") as f:
                 data = json.load(f)
+            
+            # Ensure structure is correct
+            if "windows" not in data:
+                data["windows"] = {}
+            elif not isinstance(data.get("windows"), dict):
+                data["windows"] = {}
+            
+            # Remove screen_dimmer if present (we don't save it)
+            if "screen_dimmer" in data:
+                del data["screen_dimmer"]
+                
         except FileNotFoundError:
+            data = {"windows": {}}
+        except json.JSONDecodeError as e:
+            log_error("data.json corrupted when updating slider value", e)
+            return
+        except Exception as e:
+            log_error(f"Error reading data.json for slider update: {str(e)[:200]}", e)
             return
         
         data["windows"][window] = int(value)
         
-        with open("data.json", "w") as f:
-            json.dump(data, f, indent=4)
+        try:
+            with open("data.json", "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4)
+        except Exception as e:
+            log_error(f"Failed to save data.json after slider update: {str(e)[:200]}", e)
     
     def restore_all_windows_transparency(self):
         """Restore all modified windows to full opacity."""
@@ -432,54 +703,63 @@ class TransparencyApp:
         """Create a black overlay window that covers the entire screen.
         This overlay sits on top of all windows but is click-through,
         allowing interaction while providing screen dimming effect."""
-        # Get screen dimensions
-        screen_width = win32api.GetSystemMetrics(0)
-        screen_height = win32api.GetSystemMetrics(1)
-        
-        # Create a window class
-        wc = win32gui.WNDCLASS()
-        wc.lpfnWndProc = lambda hwnd, msg, wParam, lParam: win32gui.DefWindowProc(hwnd, msg, wParam, lParam)
-        wc.lpszClassName = "DimmingOverlay"
-        wc.hInstance = win32api.GetModuleHandle(None)
-        wc.hbrBackground = win32gui.GetStockObject(win32con.BLACK_BRUSH)
-        
         try:
-            win32gui.RegisterClass(wc)
-        except:
-            pass  # Class might already be registered
-        
-        # Create the window with layered, transparent, topmost, and no-activate flags
-        # WS_EX_TRANSPARENT makes it click-through
-        # WS_EX_TOPMOST keeps it above all windows
-        # WS_EX_NOACTIVATE prevents it from stealing focus
-        hwnd = win32gui.CreateWindowEx(
-            win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT | win32con.WS_EX_TOPMOST | win32con.WS_EX_NOACTIVATE,
-            "DimmingOverlay",
-            "Screen Dimming Overlay",
-            win32con.WS_POPUP | win32con.WS_VISIBLE,
-            0, 0,
-            screen_width, screen_height,
-            None, None, None, None
-        )
-        
-        # Ensure window properties are set correctly
-        style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
-        win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, style | win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT | win32con.WS_EX_TOPMOST | win32con.WS_EX_NOACTIVATE)
-        
-        # Set transparency (0 = fully transparent, 255 = fully opaque black)
-        # Higher slider value = more dimming = higher alpha on black overlay
-        alpha = self.dimming_intensity
-        ctypes.windll.user32.SetLayeredWindowAttributes(hwnd, 0, alpha, win32con.LWA_ALPHA)
-        
-        # Keep window on top
-        win32gui.SetWindowPos(
-            hwnd,
-            win32con.HWND_TOPMOST,
-            0, 0, screen_width, screen_height,
-            win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE
-        )
-        
-        return hwnd
+            # Get screen dimensions
+            screen_width = win32api.GetSystemMetrics(0)
+            screen_height = win32api.GetSystemMetrics(1)
+            
+            # Create a window class
+            wc = win32gui.WNDCLASS()
+            wc.lpfnWndProc = lambda hwnd, msg, wParam, lParam: win32gui.DefWindowProc(hwnd, msg, wParam, lParam)
+            wc.lpszClassName = "DimmingOverlay"
+            wc.hInstance = win32api.GetModuleHandle(None)
+            wc.hbrBackground = win32gui.GetStockObject(win32con.BLACK_BRUSH)
+            
+            try:
+                win32gui.RegisterClass(wc)
+            except Exception as e:
+                # Class might already be registered, that's okay
+                pass
+            
+            # Create the window with layered, transparent, topmost, and no-activate flags
+            # WS_EX_TRANSPARENT makes it click-through
+            # WS_EX_TOPMOST keeps it above all windows
+            # WS_EX_NOACTIVATE prevents it from stealing focus
+            hwnd = win32gui.CreateWindowEx(
+                win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT | win32con.WS_EX_TOPMOST | win32con.WS_EX_NOACTIVATE,
+                "DimmingOverlay",
+                "Screen Dimming Overlay",
+                win32con.WS_POPUP | win32con.WS_VISIBLE,
+                0, 0,
+                screen_width, screen_height,
+                None, None, None, None
+            )
+            
+            if not hwnd:
+                log_error("Failed to create dimming overlay window")
+                return None
+            
+            # Ensure window properties are set correctly
+            style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+            win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, style | win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT | win32con.WS_EX_TOPMOST | win32con.WS_EX_NOACTIVATE)
+            
+            # Set transparency (0 = fully transparent, 255 = fully opaque black)
+            # Higher slider value = more dimming = higher alpha on black overlay
+            alpha = self.dimming_intensity
+            ctypes.windll.user32.SetLayeredWindowAttributes(hwnd, 0, alpha, win32con.LWA_ALPHA)
+            
+            # Keep window on top
+            win32gui.SetWindowPos(
+                hwnd,
+                win32con.HWND_TOPMOST,
+                0, 0, screen_width, screen_height,
+                win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE
+            )
+            
+            return hwnd
+        except Exception as e:
+            log_error(f"Error creating dimming overlay: {str(e)[:200]}", e)
+            return None
     
     def update_screen_dimming(self):
         """Enable or disable screen dimming."""
@@ -508,11 +788,15 @@ class TransparencyApp:
     
     def maintain_dimming_overlay(self):
         """Maintain the dimming overlay window, recreating if needed."""
+        error_count = 0
         while self.running:
             try:
                 if self.dimming_enabled:
                     if self.dimming_overlay_hwnd is None or not win32gui.IsWindow(self.dimming_overlay_hwnd):
                         self.dimming_overlay_hwnd = self.create_dimming_overlay()
+                        if self.dimming_overlay_hwnd is None and error_count < 3:
+                            error_count += 1
+                            log_warning(f"Failed to create dimming overlay (attempt {error_count})")
                     else:
                         # Ensure overlay stays visible and positioned correctly
                         screen_width = win32api.GetSystemMetrics(0)
@@ -525,24 +809,44 @@ class TransparencyApp:
                         )
                         alpha = self.dimming_intensity
                         ctypes.windll.user32.SetLayeredWindowAttributes(self.dimming_overlay_hwnd, 0, alpha, win32con.LWA_ALPHA)
+                        error_count = 0  # Reset on success
             except Exception as e:
-                pass  # Silently handle errors
+                error_count += 1
+                if error_count <= 3:
+                    log_error(f"Error maintaining dimming overlay: {str(e)[:200]}", e)
             threading.Event().wait(0.5)  # Check every 500ms
 
 def main():
-    root = tk.Tk()
-    app = TransparencyApp(root)
+    log_info("TransparencyApp starting")
+    
     try:
-        root.mainloop()
+        root = tk.Tk()
+        app = TransparencyApp(root)
+        log_info("TransparencyApp initialized successfully")
+        
+        try:
+            root.mainloop()
+        except KeyboardInterrupt:
+            log_info("Application interrupted by user")
+        except Exception as e:
+            log_error("Critical error in main loop", e)
+    except Exception as e:
+        log_error("Critical error during application startup", e)
     finally:
-        # Clean up on exit
-        app.running = False
-        # Restore all window transparency
-        app.restore_all_windows_transparency()
-        # Clean up dimming overlay
-        if app.dimming_overlay_hwnd is not None:
-            if win32gui.IsWindow(app.dimming_overlay_hwnd):
-                win32gui.DestroyWindow(app.dimming_overlay_hwnd)
+        log_info("TransparencyApp shutting down")
+        try:
+            # Clean up on exit
+            app.running = False
+            # Restore all window transparency
+            app.restore_all_windows_transparency()
+            # Clean up dimming overlay
+            if app.dimming_overlay_hwnd is not None:
+                if win32gui.IsWindow(app.dimming_overlay_hwnd):
+                    win32gui.DestroyWindow(app.dimming_overlay_hwnd)
+        except Exception as e:
+            log_error("Error during cleanup", e)
+        
+        log_info("TransparencyApp shutdown complete")
         # Force exit to ensure all threads terminate
         import os
         os._exit(0)
