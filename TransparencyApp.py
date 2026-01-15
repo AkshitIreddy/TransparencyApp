@@ -9,11 +9,32 @@ import pystray
 from PIL import Image, ImageTk
 import threading
 import ctypes
+from ctypes import wintypes
 import win32con
 import win32api
 from datetime import datetime
 import traceback
 import os
+
+# Constants for taskbar detection
+ABM_GETTASKBARPOS = 0x00000005
+ABM_GETSTATE = 0x00000004
+ABS_AUTOHIDE = 0x0000001
+ABE_LEFT = 0
+ABE_TOP = 1
+ABE_RIGHT = 2
+ABE_BOTTOM = 3
+
+# Define APPBARDATA structure for taskbar detection
+class APPBARDATA(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("hWnd", wintypes.HWND),
+        ("uCallbackMessage", wintypes.UINT),
+        ("uEdge", wintypes.UINT),
+        ("rc", wintypes.RECT),
+        ("lParam", wintypes.LPARAM),
+    ]
 
 # Logging system - tracks logged messages to avoid duplicates
 _logged_messages = set()
@@ -201,6 +222,9 @@ class TransparencyApp:
         self.dimming_overlay_hwnd = None
         self.dimming_intensity = 128  # Default intensity
         self.dimming_enabled = False  # Default disabled
+        self.overlay_geometry = None  # Will store (x, y, width, height)
+        self.taskbar_auto_hide = False
+        self.taskbar_edge = ABE_BOTTOM
         
         # Set the slider to match defaults
         self.dimming_slider.set(128)
@@ -699,14 +723,68 @@ class TransparencyApp:
                         ctypes.windll.user32.SetLayeredWindowAttributes(hwnd, 0, 255, win32con.LWA_ALPHA)
             self.previous_transparency.clear()
     
+    def get_taskbar_info(self):
+        """Get taskbar position, auto-hide state, and dimensions.
+        Returns: (edge, is_auto_hide, rect) where edge is ABE_LEFT/TOP/RIGHT/BOTTOM
+        and rect is (left, top, right, bottom)"""
+        try:
+            # Initialize APPBARDATA structure
+            abd = APPBARDATA()
+            abd.cbSize = ctypes.sizeof(APPBARDATA)
+            
+            # Get taskbar state (auto-hide, always-on-top)
+            state = ctypes.windll.shell32.SHAppBarMessage(ABM_GETSTATE, ctypes.byref(abd))
+            is_auto_hide = bool(state & ABS_AUTOHIDE)
+            
+            # Get taskbar position
+            abd2 = APPBARDATA()
+            abd2.cbSize = ctypes.sizeof(APPBARDATA)
+            ctypes.windll.shell32.SHAppBarMessage(ABM_GETTASKBARPOS, ctypes.byref(abd2))
+            
+            edge = abd2.uEdge
+            rect = (abd2.rc.left, abd2.rc.top, abd2.rc.right, abd2.rc.bottom)
+            
+            return edge, is_auto_hide, rect
+        except Exception as e:
+            log_error(f"Error getting taskbar info: {str(e)[:200]}", e)
+            # Default to bottom edge, no auto-hide
+            return ABE_BOTTOM, False, (0, 0, 0, 0)
+    
     def create_dimming_overlay(self):
-        """Create a black overlay window that covers the entire screen.
+        """Create a black overlay window that covers the screen.
         This overlay sits on top of all windows but is click-through,
-        allowing interaction while providing screen dimming effect."""
+        allowing interaction while providing screen dimming effect.
+        Leaves a gap at the taskbar edge if auto-hide is enabled."""
         try:
             # Get screen dimensions
             screen_width = win32api.GetSystemMetrics(0)
             screen_height = win32api.GetSystemMetrics(1)
+            
+            # Get taskbar info
+            taskbar_edge, is_auto_hide, taskbar_rect = self.get_taskbar_info()
+            
+            # Calculate overlay dimensions, leaving gap for auto-hide taskbar
+            overlay_x = 0
+            overlay_y = 0
+            overlay_width = screen_width
+            overlay_height = screen_height
+            
+            # Gap size in pixels - enough for Windows to detect cursor at edge
+            GAP_SIZE = 2
+            
+            if is_auto_hide:
+                if taskbar_edge == ABE_BOTTOM:
+                    overlay_height = screen_height - GAP_SIZE
+                elif taskbar_edge == ABE_TOP:
+                    overlay_y = GAP_SIZE
+                    overlay_height = screen_height - GAP_SIZE
+                elif taskbar_edge == ABE_LEFT:
+                    overlay_x = GAP_SIZE
+                    overlay_width = screen_width - GAP_SIZE
+                elif taskbar_edge == ABE_RIGHT:
+                    overlay_width = screen_width - GAP_SIZE
+                
+                log_info(f"Taskbar auto-hide detected at edge {taskbar_edge}. Leaving {GAP_SIZE}px gap.")
             
             # Create a window class
             wc = win32gui.WNDCLASS()
@@ -730,8 +808,8 @@ class TransparencyApp:
                 "DimmingOverlay",
                 "Screen Dimming Overlay",
                 win32con.WS_POPUP | win32con.WS_VISIBLE,
-                0, 0,
-                screen_width, screen_height,
+                overlay_x, overlay_y,
+                overlay_width, overlay_height,
                 None, None, None, None
             )
             
@@ -752,9 +830,14 @@ class TransparencyApp:
             win32gui.SetWindowPos(
                 hwnd,
                 win32con.HWND_TOPMOST,
-                0, 0, screen_width, screen_height,
+                overlay_x, overlay_y, overlay_width, overlay_height,
                 win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE
             )
+            
+            # Store overlay geometry for maintain function
+            self.overlay_geometry = (overlay_x, overlay_y, overlay_width, overlay_height)
+            self.taskbar_auto_hide = is_auto_hide
+            self.taskbar_edge = taskbar_edge
             
             return hwnd
         except Exception as e:
@@ -798,13 +881,40 @@ class TransparencyApp:
                             error_count += 1
                             log_warning(f"Failed to create dimming overlay (attempt {error_count})")
                     else:
+                        # Use stored geometry if available, otherwise recalculate
+                        if hasattr(self, 'overlay_geometry') and self.overlay_geometry:
+                            overlay_x, overlay_y, overlay_width, overlay_height = self.overlay_geometry
+                        else:
+                            # Fallback: get current screen size and taskbar info
+                            screen_width = win32api.GetSystemMetrics(0)
+                            screen_height = win32api.GetSystemMetrics(1)
+                            taskbar_edge, is_auto_hide, _ = self.get_taskbar_info()
+                            
+                            overlay_x = 0
+                            overlay_y = 0
+                            overlay_width = screen_width
+                            overlay_height = screen_height
+                            GAP_SIZE = 2
+                            
+                            if is_auto_hide:
+                                if taskbar_edge == ABE_BOTTOM:
+                                    overlay_height = screen_height - GAP_SIZE
+                                elif taskbar_edge == ABE_TOP:
+                                    overlay_y = GAP_SIZE
+                                    overlay_height = screen_height - GAP_SIZE
+                                elif taskbar_edge == ABE_LEFT:
+                                    overlay_x = GAP_SIZE
+                                    overlay_width = screen_width - GAP_SIZE
+                                elif taskbar_edge == ABE_RIGHT:
+                                    overlay_width = screen_width - GAP_SIZE
+                            
+                            self.overlay_geometry = (overlay_x, overlay_y, overlay_width, overlay_height)
+                        
                         # Ensure overlay stays visible and positioned correctly
-                        screen_width = win32api.GetSystemMetrics(0)
-                        screen_height = win32api.GetSystemMetrics(1)
                         win32gui.SetWindowPos(
                             self.dimming_overlay_hwnd,
                             win32con.HWND_TOPMOST,
-                            0, 0, screen_width, screen_height,
+                            overlay_x, overlay_y, overlay_width, overlay_height,
                             win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE
                         )
                         alpha = self.dimming_intensity
