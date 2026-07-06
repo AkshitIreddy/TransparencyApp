@@ -12,9 +12,6 @@ wndproc — a Python wndproc would crash once its ctypes wrapper is collected)
 and positioned far off-screen so they never appear as ghost windows.
 """
 
-import faulthandler
-import os
-import tempfile
 import threading
 import time
 import uuid
@@ -24,19 +21,10 @@ import win32api
 import win32con
 import win32gui
 
-# Per-test hang watchdog. faulthandler's timer is a raw C thread, so it fires
-# even if a Python thread is blocked in a native call holding the GIL: it
-# dumps every stack to %TEMP%/ta_fault_dump.txt and hard-exits the process.
-_fault_file = open(
-    os.path.join(tempfile.gettempdir(), "ta_fault_dump.txt"), "w", buffering=1)
-
-
-@pytest.fixture(autouse=True)
-def _hang_watchdog():
-    faulthandler.dump_traceback_later(25, exit=True, file=_fault_file)
-    yield
-    faulthandler.cancel_dump_traceback_later()
-
+# Timeouts for waits on real Win32 event delivery. Generous, because shared CI
+# runners deliver WinEvents noticeably slower than a dev box. Hard hangs are
+# caught by pytest-timeout (CI) and the sandbox tree-kill (scripts/run_tests.ps1).
+EVENT_TIMEOUT = 12.0
 
 DIALOG_CLASS = "#32770"
 
@@ -108,7 +96,7 @@ def make_window():
         w.close()
 
 
-def wait_for(predicate, timeout=6.0):
+def wait_for(predicate, timeout=EVENT_TIMEOUT):
     """Poll a condition. The test windows pump themselves, so the main
     thread just needs to read — no message pumping required here."""
     deadline = time.time() + timeout

@@ -2,6 +2,9 @@
 # scripts/sandbox_run.py), so its windows can never appear on screen, and a
 # hard watchdog force-kills the tree on timeout. Never run pytest bare on a
 # dev machine - it creates real Win32 windows.
+#
+# Uses the bare `pytest` console script (like CI does) so this wrapper catches
+# import-path problems that `python -m pytest` would mask.
 param(
     [int]$TimeoutSec = 90,
     [string]$PytestArgs = "tests -q"
@@ -9,13 +12,14 @@ param(
 
 $repo = Split-Path -Parent $PSScriptRoot
 $python = Join-Path $repo ".venv\Scripts\python.exe"
+$pytest = Join-Path $repo ".venv\Scripts\pytest.exe"
 if (-not (Test-Path $python)) { $python = "python" }
+if (-not (Test-Path $pytest)) { $pytest = "pytest" }
 $results = Join-Path $env:TEMP "ta_test_results.txt"
 if (Test-Path $results) { Remove-Item $results -Force }
 
-$argList = @("scripts\sandbox_run.py", "$TimeoutSec", "--", $python,
-             "-X", "faulthandler", "-m", "pytest") + ($PytestArgs -split " ") +
-           @(">", $results, "2>&1")
+$argList = @("scripts\sandbox_run.py", "$TimeoutSec", "--", $pytest) +
+           ($PytestArgs -split " ") + @(">", $results, "2>&1")
 & $python @argList
 $code = $LASTEXITCODE
 

@@ -78,7 +78,7 @@ class TestQueries:
 
 
 class TestWinEventHook:
-    def _wait_for(self, predicate, timeout=5.0):
+    def _wait_for(self, predicate, timeout=12.0):
         deadline = time.time() + timeout
         while time.time() < deadline:
             if predicate():

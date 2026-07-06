@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "transparency-app"
+dynamic = ["version"]
+description = "Per-window transparency control for Windows"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+    "customtkinter>=5.2,<7",
+    "pywin32>=306",
+    "pystray>=0.19",
+    "Pillow>=10",
+]
+
+[project.gui-scripts]
+transparency-app = "transparency_app.__main__:main"
+
+[tool.setuptools]
+packages = ["transparency_app", "transparency_app.ui"]
+
+[tool.setuptools.dynamic]
+version = { attr = "transparency_app.__version__" }
+
+[tool.pytest.ini_options]
+# Put the repo root on sys.path so `pytest tests` works whether it is invoked
+# as the console script or via `python -m pytest`.
+pythonpath = ["."]
+testpaths = ["tests"]

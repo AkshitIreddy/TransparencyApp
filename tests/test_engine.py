@@ -265,7 +265,7 @@ class TestCrashLedger:
 class TestIntegrationThreaded:
     """Full engine with real hooks: the paths users actually exercise."""
 
-    def _wait_alpha(self, hwnd, value, timeout=6.0):
+    def _wait_alpha(self, hwnd, value, timeout=12.0):
         return wait_for(lambda: winapi.get_window_alpha(hwnd) == value, timeout)
 
     def test_new_window_gets_alpha_via_events(self, engine, config, make_window):
