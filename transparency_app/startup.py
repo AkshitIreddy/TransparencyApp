@@ -27,7 +27,9 @@ def is_enabled(value_name: str = APP_VALUE_NAME) -> bool:
 
 def enable(value_name: str = APP_VALUE_NAME, command: str = None) -> bool:
     try:
-        with winreg.OpenKey(
+        # CreateKeyEx opens the Run key or creates it if a freshly-provisioned
+        # profile doesn't have it yet (OpenKey would raise FileNotFoundError).
+        with winreg.CreateKeyEx(
             winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE
         ) as key:
             winreg.SetValueEx(
@@ -45,6 +47,7 @@ def disable(value_name: str = APP_VALUE_NAME) -> bool:
             winreg.DeleteValue(key, value_name)
         return True
     except FileNotFoundError:
+        # Either the Run key or our value is absent — nothing to remove.
         return True
     except OSError:
         return False

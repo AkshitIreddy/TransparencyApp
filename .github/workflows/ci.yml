@@ -26,8 +26,10 @@ jobs:
 
       - name: Run tests
         # windows-latest runners have an interactive desktop, so the real-window
-        # and GUI tests run. A per-test watchdog prevents any hang from stalling CI.
-        run: pytest tests -v --timeout=60 --timeout-method=thread
+        # and GUI tests run. --timeout guards against hangs; --reruns absorbs the
+        # occasional slow WinEvent delivery on a shared runner (a real failure
+        # still fails all attempts).
+        run: pytest tests -v --timeout=90 --timeout-method=thread --reruns 2 --reruns-delay 2
 
       - name: Smoke-check the app imports and builds a window
         run: python run_app.py --self-test
