@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (e.g. v2.0.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest tests -q --timeout=60 --timeout-method=thread
+
+      - name: Build executable
+        run: pyinstaller --clean --noconfirm TransparencyApp.spec
+
+      - name: Smoke-test the built executable
+        run: dist\TransparencyApp.exe --self-test
+
+      - name: Package release zip
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event.inputs.tag }}"
+          if (-not $tag) { $tag = "${{ github.ref_name }}" }
+          $stage = "release/TransparencyApp-$tag"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item dist\TransparencyApp.exe $stage\
+          Copy-Item README.md $stage\
+          Copy-Item LICENSE $stage\
+          Compress-Archive -Path "$stage\*" -DestinationPath "release\TransparencyApp-$tag.zip" -Force
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: Transparency App ${{ github.event.inputs.tag || github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/TransparencyApp.exe
+            release/TransparencyApp-*.zip

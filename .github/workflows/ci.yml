@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        # windows-latest runners have an interactive desktop, so the real-window
+        # and GUI tests run. A per-test watchdog prevents any hang from stalling CI.
+        run: pytest tests -v --timeout=60 --timeout-method=thread
+
+      - name: Smoke-check the app imports and builds a window
+        run: python run_app.py --self-test
