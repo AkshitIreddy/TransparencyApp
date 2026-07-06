@@ -172,6 +172,25 @@ class TestFocusMode:
         engine._restore_everything()
         assert winapi.get_window_alpha(native_window.hwnd) is None
 
+    def test_zero_opacity_rule_never_hides_focused_window(self, engine, config,
+                                                          native_window):
+        # A 0% rule on the window you're focused on must not make it invisible.
+        config.add_rule(native_window.title, opacity=0)
+        engine.focus_mode = True
+        engine._last_foreground = native_window.hwnd
+        engine._apply_to(winapi.get_window_info(native_window.hwnd),
+                         native_window.hwnd)
+        alpha = winapi.get_window_alpha(native_window.hwnd)
+        assert alpha is not None and alpha >= 20
+
+    def test_foreground_tracked_while_paused(self, engine, second_window):
+        # A foreground event during pause must still update _last_foreground,
+        # so resume doesn't act on a stale value.
+        engine.focus_mode = True
+        engine.paused = True
+        engine._handle_event(winapi.EVENT_SYSTEM_FOREGROUND, second_window.hwnd)
+        assert engine._last_foreground == second_window.hwnd
+
 
 class TestCrashLedger:
     def test_ledger_written_and_recovered(self, config, tmp_path, native_window):
@@ -193,6 +212,40 @@ class TestCrashLedger:
         eng2._recover_previous_session()
         assert winapi.get_window_alpha(native_window.hwnd) is None
         assert not (tmp_path / "session.json").exists()
+
+    def test_recovery_skips_hwnd_with_mismatched_identity(self, config, tmp_path,
+                                                          native_window):
+        # Simulate a crash ledger whose entry points at this HWND but records a
+        # DIFFERENT window's identity (as if the HWND had been recycled).
+        ledger = str(tmp_path / "session.json")
+        winapi.set_window_alpha(native_window.hwnd, 90)  # pretend it's ours
+        with open(ledger, "w", encoding="utf-8") as f:
+            json.dump({"pid": 1, "windows": {str(native_window.hwnd): {
+                "had_layered": False, "prev_alpha": None, "was_topmost": False,
+                "was_click": False, "process": "someone-else.exe",
+                "title": "A Totally Different Window"}}}, f)
+        eng = TransparencyEngine(config, ledger_path=ledger,
+                                 manage_own_windows=True)
+        eng._recover_previous_session()
+        # Identity didn't match, so our window must be left as-is (still 90).
+        assert winapi.get_window_alpha(native_window.hwnd) == 90
+        winapi.restore_window(native_window.hwnd)
+
+    def test_recovery_restores_topmost(self, config, tmp_path, native_window):
+        ledger = str(tmp_path / "session.json")
+        info = winapi.get_window_info(native_window.hwnd)
+        winapi.set_window_alpha(native_window.hwnd, 90)
+        winapi.set_topmost(native_window.hwnd, True)  # left topmost by "crash"
+        with open(ledger, "w", encoding="utf-8") as f:
+            json.dump({"pid": 1, "windows": {str(native_window.hwnd): {
+                "had_layered": False, "prev_alpha": None, "was_topmost": False,
+                "was_click": False, "process": info.process,
+                "title": info.title}}}, f)
+        eng = TransparencyEngine(config, ledger_path=ledger,
+                                 manage_own_windows=True)
+        eng._recover_previous_session()
+        assert winapi.get_window_alpha(native_window.hwnd) is None
+        assert not winapi.is_topmost(native_window.hwnd)
 
     def test_clean_stop_clears_ledger(self, config, tmp_path, native_window):
         ledger = str(tmp_path / "session.json")

@@ -47,7 +47,7 @@ class AppController:
 
         self.window = None
         self.tray = None
-        self._dimmer_tick_scheduled = False
+        self._dimmer_tick_id = None
 
     def _resolve_icon(self):
         for name in ("icon.ico", "assets/icon.ico"):
@@ -82,6 +82,28 @@ class AppController:
         finally:
             self._shutdown()
 
+    def self_test(self) -> bool:
+        """Bring the app up without mainloop, exercise it, tear down. For CI."""
+        from .ui.app_window import AppWindow
+        try:
+            self.engine.start()
+            self.window = AppWindow(self)
+            for page in ("rules", "focus", "dimmer", "settings"):
+                self.window.show_page(page)
+                self.window.update_idletasks()
+                self.window.update()
+            self.window.destroy()
+            return True
+        except Exception:
+            log.exception("self-test failed")
+            return False
+        finally:
+            try:
+                self.engine.stop()
+                self.config.close()
+            except Exception:
+                pass
+
     def _shutdown(self):
         log.info("shutting down")
         try:
@@ -100,14 +122,19 @@ class AppController:
     # -- thread marshalling ---------------------------------------------------
 
     def _ui(self, fn):
-        """Run fn on the Tk main thread (safe from any thread)."""
-        if self.window is not None:
-            try:
-                self.window.after(0, fn)
-                return
-            except Exception:
-                pass
-        fn()
+        """Marshal fn onto the Tk main thread (safe to call from any thread).
+
+        Never run fn synchronously as a fallback: Tk must only be touched on
+        the main thread, so if the window is gone or the marshal fails, the
+        call is simply dropped.
+        """
+        window = self.window
+        if window is None:
+            return
+        try:
+            window.after(0, fn)
+        except Exception:
+            pass
 
     # -- window visibility ----------------------------------------------------
 
@@ -180,19 +207,30 @@ class AppController:
         self.dimmer.set_enabled(enabled)
         if enabled:
             self._schedule_dimmer_tick()
+        else:
+            self._cancel_dimmer_tick()
 
     def set_dimmer_intensity(self, value):
         self.dimmer.set_intensity(value)
 
+    def _cancel_dimmer_tick(self):
+        if self._dimmer_tick_id is not None and self.window is not None:
+            try:
+                self.window.after_cancel(self._dimmer_tick_id)
+            except Exception:
+                pass
+        self._dimmer_tick_id = None
+
     def _schedule_dimmer_tick(self):
         # Keep the overlay topmost/sized; runs on the UI thread (which owns the
-        # overlay's message pump). Stops rescheduling once the dimmer is off.
+        # overlay's message pump). Exactly one tick chain runs at a time —
+        # cancelling any pending one first prevents rapid off/on from stacking
+        # overlapping loops.
+        self._cancel_dimmer_tick()
         if not self.dimmer.enabled or self.window is None:
-            self._dimmer_tick_scheduled = False
             return
         self.dimmer.tick()
-        self._dimmer_tick_scheduled = True
-        self.window.after(2000, self._schedule_dimmer_tick)
+        self._dimmer_tick_id = self.window.after(2000, self._schedule_dimmer_tick)
 
     # -- hotkeys --------------------------------------------------------------
 

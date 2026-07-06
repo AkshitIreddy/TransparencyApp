@@ -42,9 +42,9 @@ class _WindowState:
     """What a window looked like before we touched it, and what we applied."""
 
     __slots__ = ("had_layered", "prev_alpha", "was_topmost", "was_click",
-                 "alpha", "click", "topmost")
+                 "alpha", "click", "topmost", "process", "title")
 
-    def __init__(self, hwnd):
+    def __init__(self, hwnd, info=None):
         style = winapi.get_window_exstyle(hwnd)
         self.had_layered = bool(style & 0x00080000)   # WS_EX_LAYERED
         self.was_click = bool(style & 0x00000020)     # WS_EX_TRANSPARENT
@@ -53,6 +53,11 @@ class _WindowState:
         self.alpha = None      # alpha we applied (None = not yet)
         self.click = self.was_click
         self.topmost = self.was_topmost
+        # Identity, so crash recovery never restores a reused HWND that now
+        # belongs to a different window.
+        self.process = info.process if info else winapi.get_process_name(
+            winapi.get_window_pid(hwnd))
+        self.title = info.title if info else winapi.get_window_title(hwnd)
 
     def snapshot(self):
         return {
@@ -60,6 +65,8 @@ class _WindowState:
             "prev_alpha": self.prev_alpha,
             "was_topmost": self.was_topmost,
             "was_click": self.was_click,
+            "process": self.process,
+            "title": self.title,
         }
 
 
@@ -214,16 +221,19 @@ class TransparencyEngine:
         if event == winapi.EVENT_OBJECT_DESTROY:
             self._forget(hwnd)
             return
+        # Track the real foreground even while paused, so the value the sweep
+        # and _apply_one trust is never stale after an alt-tab-then-resume.
+        previous = self._last_foreground
+        if event == winapi.EVENT_SYSTEM_FOREGROUND:
+            self._last_foreground = hwnd
         if self.paused:
             return
-        if event == winapi.EVENT_SYSTEM_FOREGROUND:
-            previous, self._last_foreground = self._last_foreground, hwnd
-            if self.focus_mode:
-                # Two windows change roles; no full sweep needed.
-                self._apply_one(hwnd)
-                if previous and previous != hwnd:
-                    self._apply_one(previous)
-                return
+        if event == winapi.EVENT_SYSTEM_FOREGROUND and self.focus_mode:
+            # Two windows change roles; no full sweep needed.
+            self._apply_one(hwnd)
+            if previous and previous != hwnd:
+                self._apply_one(previous)
+            return
         self._apply_one(hwnd)
 
     # -- application logic (worker thread only) -----------------------------------
@@ -240,7 +250,10 @@ class TransparencyEngine:
                 return None
             rule = self._config.find_matching_rule(info.title, info.process)
             if info.hwnd == foreground_hwnd:
-                return rule.opacity if rule else fm["active_opacity"]
+                # Never let focus mode make the window you're using invisible,
+                # even if its rule opacity is 0.
+                target = rule.opacity if rule else fm["active_opacity"]
+                return max(MIN_FOCUS_BACKGROUND_ALPHA, target)
             return max(MIN_FOCUS_BACKGROUND_ALPHA, fm["background_opacity"])
 
         rule = self._config.find_matching_rule(info.title, info.process)
@@ -276,7 +289,7 @@ class TransparencyEngine:
 
         state = self._state.get(hwnd)
         if state is None:
-            state = _WindowState(hwnd)
+            state = _WindowState(hwnd, info)
             self._state[hwnd] = state
             self._ledger_dirty = True
 
@@ -312,12 +325,15 @@ class TransparencyEngine:
                 self._forget(hwnd)
 
     def _restore_one(self, hwnd, state):
-        winapi.restore_window(hwnd, state.had_layered, state.prev_alpha)
+        ok = winapi.restore_window(hwnd, state.had_layered, state.prev_alpha)
         if state.click != state.was_click:
-            winapi.set_click_through(hwnd, state.was_click)
+            ok = winapi.set_click_through(hwnd, state.was_click) and ok
         if state.topmost != state.was_topmost:
-            winapi.set_topmost(hwnd, state.was_topmost)
-        self._forget(hwnd)
+            ok = winapi.set_topmost(hwnd, state.was_topmost) and ok
+        # If a restore call failed (e.g. the target app was mid-repaint), keep
+        # the window tracked so a later sweep or crash recovery can retry it.
+        if ok or not winapi.is_window(hwnd):
+            self._forget(hwnd)
 
     def _restore_everything(self):
         for hwnd, state in list(self._state.items()):
@@ -374,17 +390,29 @@ class TransparencyEngine:
             recovered = 0
             for hwnd_str, snap in data.get("windows", {}).items():
                 hwnd = int(hwnd_str)
-                # Only touch windows that still exist and are still layered
-                # (i.e. plausibly still carrying our alpha).
-                if winapi.is_window(hwnd) and winapi.get_window_alpha(hwnd) is not None:
-                    winapi.restore_window(
-                        hwnd,
-                        bool(snap.get("had_layered")),
-                        snap.get("prev_alpha"),
-                    )
-                    if not snap.get("was_click", False):
-                        winapi.set_click_through(hwnd, False)
-                    recovered += 1
+                # HWNDs get recycled: only restore if the window is still an
+                # app window AND its identity matches what we recorded, so we
+                # never de-transparent an unrelated window that inherited the
+                # handle.
+                if not winapi.is_app_window(hwnd):
+                    continue
+                if winapi.get_window_alpha(hwnd) is None:
+                    continue
+                info = winapi.get_window_info(hwnd)
+                if snap.get("process") and info.process != snap["process"]:
+                    continue
+                if snap.get("title") and info.title != snap["title"]:
+                    continue
+                winapi.restore_window(
+                    hwnd,
+                    bool(snap.get("had_layered")),
+                    snap.get("prev_alpha"),
+                )
+                if not snap.get("was_click", False):
+                    winapi.set_click_through(hwnd, False)
+                if not snap.get("was_topmost", False):
+                    winapi.set_topmost(hwnd, False)
+                recovered += 1
             if recovered:
                 log.info("recovered %d windows from previous session", recovered)
         except (OSError, ValueError, json.JSONDecodeError):

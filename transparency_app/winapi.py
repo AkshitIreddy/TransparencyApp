@@ -46,7 +46,16 @@ user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 user32.GetWindowTextW.restype = ctypes.c_int
 user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 user32.GetClassNameW.restype = ctypes.c_int
+user32.SetWindowPos.argtypes = [
+    wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+    ctypes.c_int, ctypes.c_int, ctypes.c_uint]
 user32.SetWindowPos.restype = wintypes.BOOL
+# HWND args must be typed so a 64-bit handle is not truncated to c_int.
+user32.SetLayeredWindowAttributes.argtypes = [
+    wintypes.HWND, wintypes.COLORREF, ctypes.c_ubyte, wintypes.DWORD]
+user32.SetLayeredWindowAttributes.restype = wintypes.BOOL
+user32.GetLayeredWindowAttributes.restype = wintypes.BOOL
+user32.GetForegroundWindow.restype = wintypes.HWND
 
 
 def _get_long(hwnd, index):

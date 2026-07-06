@@ -213,13 +213,19 @@ class ConfigManager:
                 self._save_timer.cancel()
                 self._save_timer = None
             data = self._snapshot()
-        tmp_path = self.path + ".tmp"
+        # A per-write unique temp name so an already-fired debounce timer and
+        # close()/save_now() on another thread can never truncate each other's
+        # temp file mid os.replace (which on Windows corrupts the target).
+        tmp_path = f"{self.path}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
         try:
             with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
             os.replace(tmp_path, self.path)
         except OSError:
-            pass
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
     def save_soon(self):
         """Debounced save: many slider ticks collapse into one disk write."""
@@ -383,6 +389,7 @@ class ConfigManager:
         """Flush any pending debounced save."""
         with self._lock:
             timer = self._save_timer
+            self._save_timer = None
         if timer is not None:
             timer.cancel()
         self.save_now()
