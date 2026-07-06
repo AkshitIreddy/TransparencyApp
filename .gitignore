@@ -13,6 +13,7 @@ dist/
 *.dist/
 *.onefile-build/
 *.spec
+!TransparencyApp.spec
 *.exe
 *.zip
 release/
