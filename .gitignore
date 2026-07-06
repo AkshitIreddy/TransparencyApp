@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Build artifacts
+build/
+dist/
+*.build/
+*.dist/
+*.onefile-build/
+*.spec
+*.exe
+*.zip
+release/
+
+# Runtime / user data
+data.json
+data.json.backup
+*.backup.*
+error_log.txt
+*.log
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/
