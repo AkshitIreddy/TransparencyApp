@@ -15,6 +15,9 @@ import win32api
 from datetime import datetime
 import traceback
 import os
+import shutil
+import tempfile
+import time
 
 # Constants for taskbar detection
 ABM_GETTASKBARPOS = 0x00000005
@@ -85,8 +88,37 @@ def log_info(message):
 
 def is_file_explorer_window(hwnd):
     """Check if the window represented by hwnd is a File Explorer window."""
-    class_name = win32gui.GetClassName(hwnd)
-    return class_name == "CabinetWClass"
+    try:
+        if not win32gui.IsWindow(hwnd):
+            return False
+        class_name = win32gui.GetClassName(hwnd)
+        return class_name == "CabinetWClass"
+    except Exception:
+        return False
+
+def cleanup_stale_onefile_temp_dirs(max_age_hours=24):
+    """Remove old onefile extraction directories that can accumulate over time."""
+    try:
+        temp_dir = tempfile.gettempdir()
+        now = time.time()
+        removed_count = 0
+        for entry in os.listdir(temp_dir):
+            if not entry.lower().startswith("onefile_"):
+                continue
+            full_path = os.path.join(temp_dir, entry)
+            if not os.path.isdir(full_path):
+                continue
+            try:
+                age_seconds = now - os.path.getmtime(full_path)
+                if age_seconds >= max_age_hours * 3600:
+                    shutil.rmtree(full_path, ignore_errors=True)
+                    removed_count += 1
+            except Exception:
+                continue
+        if removed_count:
+            log_info(f"Cleaned up {removed_count} stale onefile temp folders")
+    except Exception as e:
+        log_warning(f"Failed to clean stale onefile temp folders: {str(e)[:200]}")
 
 def set_transparency_for_file_explorer(hwnd, transparency_level, track_modified=None):
     """Set transparency for the File Explorer window identified by hwnd."""
@@ -117,10 +149,12 @@ def set_transparency_for_app(app_name, transparency_level, track_modified=None):
 
     def enum_windows_proc(hwnd, lParam):
         """Callback function for each enumerated window."""
-        # Check if the window title contains the app name
-        window_title = win32gui.GetWindowText(hwnd).lower()
-        if app_name_lower in window_title:
-            if win32gui.IsWindow(hwnd):
+        try:
+            if not win32gui.IsWindow(hwnd):
+                return True
+            # Check if the window title contains the app name
+            window_title = win32gui.GetWindowText(hwnd).lower()
+            if app_name_lower in window_title:
                 # Get the current window style
                 style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
                 # Add the transparency flag to the window style
@@ -129,6 +163,8 @@ def set_transparency_for_app(app_name, transparency_level, track_modified=None):
                 ctypes.windll.user32.SetLayeredWindowAttributes(hwnd, 0, transparency_level, win32con.LWA_ALPHA)
                 if track_modified is not None:
                     track_modified.add(hwnd)
+        except Exception:
+            pass
         return True
 
     # Enumerate all top-level windows
@@ -158,10 +194,13 @@ def get_open_windows():
     open_windows = []
     
     def enum_windows_proc(hwnd, lParam):
-        if is_visible_window(hwnd):
-            window_title = win32gui.GetWindowText(hwnd)
-            if window_title and window_title not in EXCLUDE_TITLES:
-                open_windows.append(hwnd)
+        try:
+            if is_visible_window(hwnd):
+                window_title = win32gui.GetWindowText(hwnd)
+                if window_title and window_title not in EXCLUDE_TITLES:
+                    open_windows.append(hwnd)
+        except Exception:
+            pass
         return True
     
     win32gui.EnumWindows(enum_windows_proc, None)
@@ -928,6 +967,7 @@ class TransparencyApp:
 
 def main():
     log_info("TransparencyApp starting")
+    cleanup_stale_onefile_temp_dirs(max_age_hours=24)
     
     try:
         root = tk.Tk()
