@@ -62,7 +62,7 @@ def _get_taskbar_state():
 class ScreenDimmer:
     def __init__(self):
         self._hwnd = None
-        self._intensity = 120  # 0..MAX_DIM_ALPHA
+        self._intensity = 160  # 0..MAX_DIM_ALPHA
         self.enabled = False
 
     @property

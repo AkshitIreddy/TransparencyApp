@@ -194,3 +194,34 @@ class TestSettings:
     def test_focus_exclude_normalized(self, config):
         config.set_setting("focus_mode", {"exclude": ["Chrome.EXE", ""]})
         assert config.get_setting("focus_mode")["exclude"] == ["chrome.exe"]
+
+    def test_dimmer_defaults(self, config):
+        assert config.get_setting("dimmer_intensity") == 160
+        assert config.get_setting("dimmer_enabled") is False
+
+    def test_toggles_persist(self, tmp_path):
+        path = str(tmp_path / "config.json")
+        cfg = ConfigManager(path)
+        cfg.set_setting("dimmer_enabled", True)
+        cfg.set_setting("focus_mode", {"enabled": True})
+        cfg.set_setting("accent", "teal")
+        cfg.close()
+
+        fresh = ConfigManager(path)
+        assert fresh.get_setting("dimmer_enabled") is True
+        assert fresh.get_setting("focus_mode")["enabled"] is True
+        assert fresh.get_setting("accent") == "teal"
+
+    def test_invalid_accent_rejected(self, config):
+        config.set_setting("accent", "hotdog")
+        assert config.get_setting("accent") == "blue"
+
+    def test_hotkey_overrides_persist(self, tmp_path):
+        path = str(tmp_path / "config.json")
+        cfg = ConfigManager(path)
+        cfg.set_setting("hotkeys", {"toggle_focus": "Ctrl+Shift+F9", "bad": " "})
+        cfg.close()
+
+        fresh = ConfigManager(path)
+        hot = fresh.get_setting("hotkeys")
+        assert hot == {"toggle_focus": "ctrl+shift+f9"}

@@ -6,7 +6,7 @@ from tkinter import filedialog
 
 import customtkinter as ctk
 
-from .. import __version__
+from .. import __version__, hotkeys
 from ..config import (MATCH_PROCESS, MIN_FOCUS_BACKGROUND_ALPHA)
 from ..dimmer import MAX_DIM_ALPHA
 from . import theme
@@ -29,6 +29,7 @@ class AppWindow(ctk.CTk):
         self._nav_buttons = {}
 
         theme.apply_appearance(self.config_mgr.get_setting("theme", "dark"))
+        theme.set_accent(self.config_mgr.get_setting("accent", "blue"))
         self.title("Transparency App")
         self.geometry("940x680")
         self.minsize(820, 560)
@@ -57,8 +58,9 @@ class AppWindow(ctk.CTk):
 
         brand = ctk.CTkFrame(bar, fg_color="transparent")
         brand.pack(fill="x", padx=20, pady=(24, 18))
-        ctk.CTkLabel(brand, text="◐", font=theme.font(28, "bold"),
-                     text_color=theme.ACCENT).pack(side="left")
+        self._brand_icon = ctk.CTkLabel(brand, text="◐", font=theme.font(28, "bold"),
+                                        text_color=theme.ACCENT)
+        self._brand_icon.pack(side="left")
         ctk.CTkLabel(brand, text="Transparency", font=theme.h2(),
                      text_color=theme.TEXT).pack(side="left", padx=8)
 
@@ -80,7 +82,8 @@ class AppWindow(ctk.CTk):
         self.pause_switch.select()
         self.pause_switch.pack(padx=20, pady=(0, 6), anchor="w")
         Tooltip(self.pause_switch,
-                "Master switch. Off restores every window to normal instantly.")
+                "Master switch for transparency rules. Off restores windows "
+                "instantly; focus mode keeps working.")
 
         ctk.CTkLabel(bar, text=f"v{__version__}", font=theme.small(),
                      text_color=theme.TEXT_MUTED).pack(padx=20, pady=(0, 16),
@@ -389,10 +392,29 @@ class AppWindow(ctk.CTk):
         row.pack(fill="x", padx=16, pady=(0, 14))
         ctk.CTkLabel(row, text="Theme", font=theme.body(),
                      text_color=theme.TEXT).pack(side="left")
-        ctk.CTkSegmentedButton(
+        theme_btn = ctk.CTkSegmentedButton(
             row, values=["Dark", "Light", "System"], command=self._change_theme,
-            selected_color=theme.ACCENT, selected_hover_color=theme.ACCENT_HOVER
-        ).pack(side="right")
+            selected_color=theme.ACCENT, selected_hover_color=theme.ACCENT_HOVER)
+        theme_btn.set(self.config_mgr.get_setting("theme", "dark").capitalize())
+        theme_btn.pack(side="right")
+
+        accent_row = ctk.CTkFrame(appearance, fg_color="transparent")
+        accent_row.pack(fill="x", padx=16, pady=(0, 14))
+        ctk.CTkLabel(accent_row, text="Accent colour", font=theme.body(),
+                     text_color=theme.TEXT).pack(side="left")
+        swatches = ctk.CTkFrame(accent_row, fg_color="transparent")
+        swatches.pack(side="right")
+        current = self.config_mgr.get_setting("accent", "blue")
+        for name, (color, hover, _muted) in theme.ACCENTS.items():
+            btn = ctk.CTkButton(
+                swatches, text="✓" if name == current else "", width=30,
+                height=30, corner_radius=15, font=theme.small(),
+                fg_color=color, hover_color=hover, text_color="#FFFFFF",
+                border_width=2 if name == current else 0,
+                border_color=theme.TEXT,
+                command=lambda n=name: self._change_accent(n))
+            btn.pack(side="left", padx=3)
+            Tooltip(btn, name.capitalize())
 
         startup = self._section(page, "Startup & behaviour")
         self._switch_row(
@@ -406,14 +428,29 @@ class AppWindow(ctk.CTk):
             self._toggle_hotkeys)
 
         hot = self._section(page, "Keyboard shortcuts")
-        for name, combo in self.controller.hotkey_descriptions():
+        ctk.CTkLabel(
+            hot, wraplength=560, justify="left", font=theme.small(),
+            text_color=theme.TEXT_MUTED,
+            text="Click a shortcut to change it, then press the new combination."
+        ).pack(anchor="w", padx=16, pady=(0, 6))
+        for action, name, combo in self.controller.hotkey_descriptions():
             r = ctk.CTkFrame(hot, fg_color="transparent")
             r.pack(fill="x", padx=16, pady=3)
             ctk.CTkLabel(r, text=name, font=theme.body(),
                          text_color=theme.TEXT).pack(side="left")
-            ctk.CTkLabel(r, text=combo, font=theme.small(),
-                         text_color=theme.TEXT_MUTED, fg_color=theme.SURFACE_2,
-                         corner_radius=6, padx=10, pady=2).pack(side="right")
+            btn = ctk.CTkButton(
+                r, text=hotkeys.format_combo(combo), width=140, height=28,
+                font=theme.small(), fg_color=theme.SURFACE_2,
+                hover_color=theme.BORDER, text_color=theme.TEXT,
+                corner_radius=6)
+            btn.configure(command=lambda a=action, b=btn: self._rebind(a, b))
+            btn.pack(side="right")
+        reset_row = ctk.CTkFrame(hot, fg_color="transparent")
+        reset_row.pack(fill="x", padx=16, pady=(8, 0))
+        ctk.CTkButton(reset_row, text="Reset shortcuts to defaults", height=30,
+                      font=theme.small(), fg_color=theme.SURFACE_2,
+                      hover_color=theme.BORDER, text_color=theme.TEXT_MUTED,
+                      command=self._reset_hotkeys).pack(side="left")
 
         data = self._section(page, "Settings file")
         r = ctk.CTkFrame(data, fg_color="transparent")
@@ -449,6 +486,68 @@ class AppWindow(ctk.CTk):
         self.config_mgr.set_setting("theme", mode)
         self.controller.apply_theme(mode)
 
+    def _change_accent(self, name):
+        self.config_mgr.set_setting("accent", name)
+        theme.set_accent(name)
+        self._brand_icon.configure(text_color=theme.ACCENT)
+        # Rebuild the current page so every widget picks up the new palette.
+        self.show_page(self._page)
+
+    # -- hotkey rebinding ------------------------------------------------------
+
+    def _rebind(self, action, button):
+        original = button.cget("text")
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Set shortcut")
+        dialog.geometry("380x150")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.configure(fg_color=theme.BG)
+        ctk.CTkLabel(dialog, text="Press the new key combination",
+                     font=theme.h2(), text_color=theme.TEXT).pack(pady=(24, 4))
+        hint = ctk.CTkLabel(
+            dialog, text="Must include Ctrl, Alt or Shift.  Esc cancels.",
+            font=theme.small(), text_color=theme.TEXT_MUTED)
+        hint.pack()
+
+        keysym_map = {"prior": "pageup", "next": "pagedown", "return": "enter",
+                      "backspace": "backspace", "space": "space"}
+        modifier_keysyms = {"control_l", "control_r", "alt_l", "alt_r",
+                            "shift_l", "shift_r", "win_l", "win_r",
+                            "super_l", "super_r", "meta_l", "meta_r"}
+
+        def on_key(event):
+            keysym = event.keysym.lower()
+            if keysym == "escape":
+                dialog.destroy()
+                return "break"
+            if keysym in modifier_keysyms:
+                return "break"
+            mods = []
+            if event.state & 0x4:
+                mods.append("ctrl")
+            if event.state & 0x20000:
+                mods.append("alt")
+            if event.state & 0x1:
+                mods.append("shift")
+            key = keysym_map.get(keysym, keysym)
+            combo = "+".join(mods + [key])
+            ok, message = self.controller.set_hotkey_binding(action, combo)
+            if ok:
+                button.configure(text=hotkeys.format_combo(combo))
+                dialog.destroy()
+            else:
+                hint.configure(text=message, text_color=theme.DANGER)
+            return "break"
+
+        dialog.bind("<KeyPress>", on_key)
+        dialog.after(100, lambda: (dialog.grab_set(), dialog.focus_force()))
+
+    def _reset_hotkeys(self):
+        self.controller.reset_hotkey_bindings()
+        if self._page == "settings":
+            self.show_page("settings")
+
     def _toggle_startup(self, enabled):
         self.controller.set_startup(enabled)
 
@@ -466,6 +565,8 @@ class AppWindow(ctk.CTk):
         path = filedialog.askopenfilename(filetypes=[("JSON", "*.json")])
         if path and self.config_mgr.import_from(path):
             theme.apply_appearance(self.config_mgr.get_setting("theme", "dark"))
+            theme.set_accent(self.config_mgr.get_setting("accent", "blue"))
+            self._brand_icon.configure(text_color=theme.ACCENT)
             self.show_page(self._page)
 
     # -- shared helpers -------------------------------------------------------
@@ -493,6 +594,11 @@ class AppWindow(ctk.CTk):
     def set_focus_state(self, enabled):
         if hasattr(self, "focus_switch") and self.focus_switch.winfo_exists():
             (self.focus_switch.select if enabled else self.focus_switch.deselect)()
+
+    def set_dimmer_state(self, enabled):
+        if hasattr(self, "dimmer_switch") and self.dimmer_switch.winfo_exists():
+            (self.dimmer_switch.select if enabled
+             else self.dimmer_switch.deselect)()
 
     def _tick(self):
         try:

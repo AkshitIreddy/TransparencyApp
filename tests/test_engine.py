@@ -183,6 +183,47 @@ class TestFocusMode:
         alpha = winapi.get_window_alpha(native_window.hwnd)
         assert alpha is not None and alpha >= 20
 
+    def test_focus_mode_still_works_while_paused(self, engine, config,
+                                                 native_window, second_window):
+        # Pausing transparency turns rules off but focus mode keeps dimming.
+        engine.focus_mode = True
+        engine.paused = True
+        fm = config.get_setting("focus_mode")
+        engine._last_foreground = second_window.hwnd
+        engine._apply_to(winapi.get_window_info(native_window.hwnd),
+                         second_window.hwnd)
+        engine._apply_to(winapi.get_window_info(second_window.hwnd),
+                         second_window.hwnd)
+        assert winapi.get_window_alpha(native_window.hwnd) == fm["background_opacity"]
+        assert winapi.get_window_alpha(second_window.hwnd) == fm["active_opacity"]
+
+    def test_rules_ignored_while_paused_in_focus_mode(self, engine, config,
+                                                      native_window):
+        # A rule's opacity must not leak through while paused: the focused
+        # window gets focus-mode's active opacity instead.
+        config.add_rule(native_window.title, opacity=42)
+        engine.focus_mode = True
+        engine.paused = True
+        fm = config.get_setting("focus_mode")
+        engine._last_foreground = native_window.hwnd
+        engine._apply_to(winapi.get_window_info(native_window.hwnd),
+                         native_window.hwnd)
+        assert winapi.get_window_alpha(native_window.hwnd) == fm["active_opacity"]
+
+    def test_paused_without_focus_mode_touches_nothing(self, engine, config,
+                                                       native_window):
+        config.add_rule(native_window.title, opacity=100)
+        engine.paused = True
+        engine._apply_one(native_window.hwnd)
+        engine._sweep()
+        assert winapi.get_window_alpha(native_window.hwnd) is None
+
+    def test_panic_disables_focus_mode(self, engine, native_window):
+        engine.focus_mode = True
+        engine._apply_to(winapi.get_window_info(native_window.hwnd), 0)
+        engine.panic_restore()
+        assert engine.paused and not engine.focus_mode
+
     def test_foreground_tracked_while_paused(self, engine, second_window):
         # A foreground event during pause must still update _last_foreground,
         # so resume doesn't act on a stale value.

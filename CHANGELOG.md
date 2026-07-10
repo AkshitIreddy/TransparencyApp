@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [semantic versioning](https://semver.org/).
 
+## [2.1.0] — 2026-07-10
+
+### Added
+- **Remappable keyboard shortcuts** — click any shortcut in Settings and
+  press a new combination. Conflicting or already-taken combinations are
+  rejected with a message, and one click resets everything to defaults.
+- **Accent colour options** — seven accent palettes (blue, purple, green,
+  orange, pink, red, teal) selectable in Settings › Appearance.
+
+### Changed
+- **Settings persist across launches** — focus mode and the screen dimmer
+  now come back exactly as you left them (previously only rules and the
+  dimmer intensity were remembered).
+- **Focus mode works while transparency is off** — the master switch now only
+  pauses per-window rules; focus mode keeps dimming background windows.
+  Panic (`Ctrl+Alt+Home`) turns both off.
+- **Higher default dimming** — the screen dimmer defaults to 80 % intensity
+  (was 60 %).
+
 ## [2.0.0] — 2026-07-07
 
 A ground-up rewrite. The single 1,000-line script is now a tested Python

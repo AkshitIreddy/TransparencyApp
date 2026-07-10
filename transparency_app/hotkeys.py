@@ -25,6 +25,69 @@ VK_UP = 0x26
 VK_DOWN = 0x28
 VK_HOME = 0x24
 
+# -- combo strings ("ctrl+alt+t") <-> (modifiers, vk) --------------------------
+
+_MOD_NAMES = {
+    "ctrl": MOD_CONTROL, "control": MOD_CONTROL,
+    "alt": MOD_ALT,
+    "shift": MOD_SHIFT,
+    "win": MOD_WIN, "super": MOD_WIN,
+}
+
+_KEY_VKS = {
+    "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27,
+    "home": 0x24, "end": 0x23, "pageup": 0x21, "pagedown": 0x22,
+    "insert": 0x2D, "delete": 0x2E, "space": 0x20, "tab": 0x09,
+    "enter": 0x0D, "return": 0x0D, "backspace": 0x08, "escape": 0x1B,
+    "plus": 0xBB, "minus": 0xBD, "comma": 0xBC, "period": 0xBE,
+}
+_KEY_VKS.update({f"f{n}": 0x70 + n - 1 for n in range(1, 25)})
+_KEY_VKS.update({chr(c): c for c in range(ord("0"), ord("9") + 1)})
+_KEY_VKS.update({chr(c).lower(): c for c in range(ord("A"), ord("Z") + 1)})
+
+_VK_NAMES = {}
+for _name, _vk in _KEY_VKS.items():
+    _VK_NAMES.setdefault(_vk, _name)
+
+_DISPLAY = {"up": "↑", "down": "↓", "left": "←", "right": "→",
+            "ctrl": "Ctrl", "alt": "Alt", "shift": "Shift", "win": "Win"}
+
+
+def parse_combo(combo: str):
+    """'ctrl+alt+t' -> (modifiers, vk), or None if invalid.
+
+    A combo needs at least one modifier (a bare global 'T' would swallow
+    normal typing) and exactly one non-modifier key.
+    """
+    mods, vk = 0, None
+    for part in str(combo).lower().replace(" ", "").split("+"):
+        if not part:
+            continue
+        if part in _MOD_NAMES:
+            mods |= _MOD_NAMES[part]
+        elif part in _KEY_VKS and vk is None:
+            vk = _KEY_VKS[part]
+        else:
+            return None
+    if not mods or vk is None:
+        return None
+    return mods, vk
+
+
+def format_combo(combo: str) -> str:
+    """Canonical human-readable form: 'ctrl+alt+t' -> 'Ctrl+Alt+T'."""
+    parsed = parse_combo(combo)
+    if parsed is None:
+        return str(combo)
+    mods, vk = parsed
+    parts = [_DISPLAY[name] for name, flag in
+             (("ctrl", MOD_CONTROL), ("alt", MOD_ALT),
+              ("shift", MOD_SHIFT), ("win", MOD_WIN)) if mods & flag]
+    key = _VK_NAMES.get(vk, "?")
+    parts.append(_DISPLAY.get(key, key.upper() if len(key) == 1 else
+                              key.capitalize()))
+    return "+".join(parts)
+
 
 class Hotkey:
     def __init__(self, hotkey_id, modifiers, vk, callback, label=""):

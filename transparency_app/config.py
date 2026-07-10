@@ -27,15 +27,21 @@ MAX_ALPHA = 255
 
 DEFAULT_SETTINGS = {
     "theme": "dark",                 # dark | light | system
+    "accent": "blue",                # key into theme.ACCENTS
     "hotkeys_enabled": True,
     "start_minimized": False,
     "focus_mode": {
+        "enabled": False,
         "active_opacity": 255,
         "background_opacity": 120,
         "exclude": [],               # process names to leave alone
     },
-    "dimmer_intensity": 120,         # 0..200; enabled state is never persisted
+    "dimmer_intensity": 160,         # 0..200
+    "dimmer_enabled": False,
+    "hotkeys": {},                   # action -> combo string overrides
 }
+
+ACCENT_NAMES = ("blue", "purple", "green", "orange", "pink", "red", "teal")
 
 
 def _clamp(value, low, high, default):
@@ -103,10 +109,21 @@ def _validate_settings(raw):
         return settings
     if raw.get("theme") in ("dark", "light", "system"):
         settings["theme"] = raw["theme"]
+    if raw.get("accent") in ACCENT_NAMES:
+        settings["accent"] = raw["accent"]
     settings["hotkeys_enabled"] = bool(raw.get("hotkeys_enabled", True))
     settings["start_minimized"] = bool(raw.get("start_minimized", False))
-    settings["dimmer_intensity"] = _clamp(raw.get("dimmer_intensity"), 0, 200, 120)
+    settings["dimmer_intensity"] = _clamp(raw.get("dimmer_intensity"), 0, 200, 160)
+    settings["dimmer_enabled"] = bool(raw.get("dimmer_enabled", False))
+    hotkeys = raw.get("hotkeys")
+    if isinstance(hotkeys, dict):
+        settings["hotkeys"] = {
+            str(action): str(combo).strip().lower()
+            for action, combo in hotkeys.items()
+            if str(combo).strip()
+        }
     fm = raw.get("focus_mode") if isinstance(raw.get("focus_mode"), dict) else {}
+    settings["focus_mode"]["enabled"] = bool(fm.get("enabled", False))
     settings["focus_mode"]["active_opacity"] = _clamp(
         fm.get("active_opacity"), MIN_FOCUS_BACKGROUND_ALPHA, MAX_ALPHA, 255)
     settings["focus_mode"]["background_opacity"] = _clamp(

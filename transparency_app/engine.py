@@ -127,8 +127,10 @@ class TransparencyEngine:
         self.paused = bool(paused)
         if self.paused:
             self._queue.put((_CMD_RESTORE_ALL,))
-        else:
-            self.request_sweep()
+        # Sweep either way: after a pause the sweep re-applies focus mode
+        # (which stays active while rules are paused); after a resume it
+        # re-applies everything.
+        self.request_sweep()
 
     def set_focus_mode(self, enabled: bool):
         self.focus_mode = bool(enabled)
@@ -143,6 +145,9 @@ class TransparencyEngine:
     def panic_restore(self):
         """Restore everything and pause: the escape hatch."""
         self.paused = True
+        # Focus mode keeps working while paused, so panic must switch it off
+        # too or the next sweep would re-dim everything.
+        self.focus_mode = False
         self._queue.put((_CMD_RESTORE_ALL,))
 
     def set_override(self, hwnd, alpha):
@@ -226,7 +231,7 @@ class TransparencyEngine:
         previous = self._last_foreground
         if event == winapi.EVENT_SYSTEM_FOREGROUND:
             self._last_foreground = hwnd
-        if self.paused:
+        if self.paused and not self.focus_mode:
             return
         if event == winapi.EVENT_SYSTEM_FOREGROUND and self.focus_mode:
             # Two windows change roles; no full sweep needed.
@@ -240,6 +245,8 @@ class TransparencyEngine:
 
     def _target_alpha(self, info, foreground_hwnd):
         """What alpha (or None = leave alone/restore) a window should have."""
+        if self.paused and not self.focus_mode:
+            return None
         override = self._overrides.get(info.hwnd)
         if override is not None:
             return override
@@ -248,7 +255,9 @@ class TransparencyEngine:
             fm = self._config.get_setting("focus_mode")
             if info.process in fm.get("exclude", []):
                 return None
-            rule = self._config.find_matching_rule(info.title, info.process)
+            # While paused, per-window rules are off but focus mode still dims.
+            rule = (None if self.paused else
+                    self._config.find_matching_rule(info.title, info.process))
             if info.hwnd == foreground_hwnd:
                 # Never let focus mode make the window you're using invisible,
                 # even if its rule opacity is 0.
@@ -299,7 +308,8 @@ class TransparencyEngine:
 
         # Click-through / topmost come from the rule (not overrides/focus mode).
         rule = None
-        if not self.focus_mode and self._overrides.get(hwnd) is None:
+        if (not self.focus_mode and not self.paused
+                and self._overrides.get(hwnd) is None):
             rule = self._config.find_matching_rule(info.title, info.process)
         want_click = bool(rule.click_through) if rule else state.was_click
         want_top = bool(rule.topmost) if rule else state.was_topmost
@@ -311,7 +321,7 @@ class TransparencyEngine:
                 state.topmost = want_top
 
     def _sweep(self):
-        if self.paused:
+        if self.paused and not self.focus_mode:
             return
         foreground = winapi.get_foreground_window()
         if self.focus_mode:

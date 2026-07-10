@@ -42,6 +42,10 @@ preset and a "Gaming" preset).
 as you switch windows. Set the focused-window and background opacity on the
 **Focus mode** page. It never makes a window fully invisible.
 
+Focus mode is independent of the master transparency switch: turning
+transparency off pauses your rules but focus mode keeps working. It is also
+remembered across launches, like the screen dimmer.
+
 ## Screen dimmer
 
 The **Screen dimmer** lays a soft dark overlay over every monitor to cut glare
@@ -49,7 +53,7 @@ in a dark room. It is click-through, so it never gets in your way.
 
 ## Global hotkeys
 
-| Shortcut | Action |
+| Default shortcut | Action |
 | --- | --- |
 | `Ctrl+Alt+T` | Toggle all transparency on/off |
 | `Ctrl+Alt+F` | Toggle focus mode |
@@ -57,11 +61,15 @@ in a dark room. It is click-through, so it never gets in your way.
 | `Ctrl+Alt+↓` | Make the focused window more transparent |
 | `Ctrl+Alt+Home` | Restore every window (panic) |
 
-Turn hotkeys off in **Settings** if they clash with another app.
+Every shortcut is remappable: in **Settings › Keyboard shortcuts**, click the
+one you want to change and press the new combination (it must include Ctrl,
+Alt or Shift). Turn hotkeys off entirely in **Settings** if they clash with
+another app.
 
 ## Settings
 
 - **Theme** — Dark, Light, or follow the system.
+- **Accent colour** — pick one of seven accent palettes.
 - **Start with Windows** — launch automatically at sign-in.
 - **Global hotkeys** — enable/disable the shortcuts above.
 - **Export… / Import…** — back up or move your rules and presets.

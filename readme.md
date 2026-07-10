@@ -35,9 +35,10 @@ tray.
   your focus automatically.
 - 🌒 **Screen dimmer** — a soft, click-through overlay across all monitors.
 - ⌨️ **Global hotkeys** — toggle transparency/focus, nudge opacity, or restore
-  everything with one keystroke.
+  everything with one keystroke. Every shortcut is remappable in Settings.
 - 🖱️ **Per-rule click-through & always-on-top.**
-- 🚀 **Run at startup**, 💾 **import/export settings**, 🌗 **dark/light theme.**
+- 🚀 **Run at startup**, 💾 **import/export settings**, 🌗 **dark/light theme**,
+  🎨 **seven accent colours.**
 
 ## Install
 
@@ -60,6 +61,8 @@ tray.
 The full guide is in **[docs/USAGE.md](docs/USAGE.md)**.
 
 ### Hotkeys
+
+All remappable in **Settings → Keyboard shortcuts**. Defaults:
 
 | Shortcut | Action |
 | --- | --- |

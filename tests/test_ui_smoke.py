@@ -46,8 +46,12 @@ class FakeController:
     def set_hotkeys_enabled(self, e): pass
     def apply_theme(self, m): pass
     def hotkey_descriptions(self):
-        return [("Toggle transparency", "Ctrl+Alt+T"),
-                ("Focus mode", "Ctrl+Alt+F")]
+        return [("toggle_transparency", "Toggle transparency", "ctrl+alt+t"),
+                ("toggle_focus", "Focus mode", "ctrl+alt+f")]
+    def set_hotkey_binding(self, action, combo):
+        self.last_binding = (action, combo)
+        return True, ""
+    def reset_hotkey_bindings(self): pass
 
 
 @pytest.fixture(scope="module")
@@ -82,6 +86,16 @@ def test_rules_render_and_add(app):
     app.update_idletasks()
     assert any(getattr(c, "rule", None) and c.rule.pattern == "notepad"
                for c in app._cards)
+
+
+def test_accent_change_applies_and_persists(app):
+    from transparency_app.ui import theme
+    app.show_page("settings")
+    app._change_accent("teal")
+    app.update_idletasks()
+    assert theme.ACCENT == theme.ACCENTS["teal"][0]
+    assert app.config_mgr.get_setting("accent") == "teal"
+    app._change_accent("blue")
 
 
 def test_pause_switch_reflects_state(app):

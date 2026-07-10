@@ -16,18 +16,15 @@ from .engine import TransparencyEngine
 
 log = logging.getLogger("transparency_app.app")
 
-# (name shown in UI, hotkey_id, modifiers, vk, controller-method-name)
+# (action key, name shown in UI, hotkey_id, default combo, controller method)
 HOTKEY_DEFS = [
-    ("Toggle transparency", 1, hk.MOD_CONTROL | hk.MOD_ALT, ord("T"),
-     "toggle_paused", "Ctrl+Alt+T"),
-    ("Toggle focus mode", 2, hk.MOD_CONTROL | hk.MOD_ALT, ord("F"),
-     "toggle_focus", "Ctrl+Alt+F"),
-    ("More opaque (active window)", 3, hk.MOD_CONTROL | hk.MOD_ALT, hk.VK_UP,
-     "nudge_up", "Ctrl+Alt+↑"),
-    ("More transparent (active window)", 4, hk.MOD_CONTROL | hk.MOD_ALT,
-     hk.VK_DOWN, "nudge_down", "Ctrl+Alt+↓"),
-    ("Restore everything (panic)", 5, hk.MOD_CONTROL | hk.MOD_ALT, hk.VK_HOME,
-     "panic", "Ctrl+Alt+Home"),
+    ("toggle_transparency", "Toggle transparency", 1, "ctrl+alt+t",
+     "toggle_paused"),
+    ("toggle_focus", "Toggle focus mode", 2, "ctrl+alt+f", "toggle_focus"),
+    ("nudge_up", "More opaque (active window)", 3, "ctrl+alt+up", "nudge_up"),
+    ("nudge_down", "More transparent (active window)", 4, "ctrl+alt+down",
+     "nudge_down"),
+    ("panic", "Restore everything (panic)", 5, "ctrl+alt+home", "panic"),
 ]
 
 NUDGE_STEP = 20
@@ -42,7 +39,7 @@ class AppController:
         self.config = ConfigManager(paths.config_path())
         self.engine = TransparencyEngine(self.config, ledger_path=paths.ledger_path())
         self.dimmer = ScreenDimmer()
-        self.dimmer.set_intensity(self.config.get_setting("dimmer_intensity", 120))
+        self.dimmer.set_intensity(self.config.get_setting("dimmer_intensity", 160))
         self.hotkeys = hk.HotkeyManager()
 
         self.window = None
@@ -70,9 +67,17 @@ class AppController:
         if self.config.get_setting("hotkeys_enabled", True):
             self._register_hotkeys()
 
+        # Restore the toggles the user left on last session.
+        if self.config.get_setting("focus_mode", {}).get("enabled"):
+            self.engine.set_focus_mode(True)
+
         self.window = AppWindow(self)
         self.tray = Tray(self, self.icon_path)
         self.tray.start()
+
+        if self.config.get_setting("dimmer_enabled", False):
+            # The overlay must be created on the UI thread once Tk is pumping.
+            self.window.after(200, lambda: self._restore_dimmer())
 
         if self.config.get_setting("start_minimized", False):
             self.window.after(200, self.hide_window)
@@ -166,6 +171,7 @@ class AppController:
 
     def set_focus_mode(self, enabled):
         self.engine.set_focus_mode(enabled)
+        self.config.set_setting("focus_mode", {"enabled": bool(enabled)})
         self._refresh_indicators()
 
     def toggle_focus(self):
@@ -178,8 +184,10 @@ class AppController:
 
     def panic(self):
         self.engine.panic_restore()
+        self.config.set_setting("focus_mode", {"enabled": False})
         if self.window:
             self._ui(lambda: self.window.set_pause_state(True))
+            self._ui(lambda: self.window.set_focus_state(False))
         self._refresh_indicators()
 
     def _nudge(self, delta):
@@ -205,6 +213,7 @@ class AppController:
 
     def set_dimmer_enabled(self, enabled):
         self.dimmer.set_enabled(enabled)
+        self.config.set_setting("dimmer_enabled", bool(enabled))
         if enabled:
             self._schedule_dimmer_tick()
         else:
@@ -212,6 +221,14 @@ class AppController:
 
     def set_dimmer_intensity(self, value):
         self.dimmer.set_intensity(value)
+        self.config.set_setting("dimmer_intensity", self.dimmer.intensity)
+
+    def _restore_dimmer(self):
+        """Re-enable the dimmer saved from last session (UI thread only)."""
+        self.dimmer.set_enabled(True)
+        self._schedule_dimmer_tick()
+        if self.window:
+            self.window.set_dimmer_state(True)
 
     def _cancel_dimmer_tick(self):
         if self._dimmer_tick_id is not None and self.window is not None:
@@ -234,14 +251,22 @@ class AppController:
 
     # -- hotkeys --------------------------------------------------------------
 
+    def _hotkey_combo(self, action, default):
+        """The active combo string for an action (saved override or default)."""
+        combo = self.config.get_setting("hotkeys", {}).get(action, default)
+        return combo if hk.parse_combo(combo) else default
+
     def _register_hotkeys(self):
-        defs = [hk.Hotkey(hid, mods, vk, getattr(self, method))
-                for (_name, hid, mods, vk, method, _combo) in HOTKEY_DEFS]
+        defs = []
+        for action, _name, hid, default, method in HOTKEY_DEFS:
+            mods, vk = hk.parse_combo(self._hotkey_combo(action, default))
+            defs.append(hk.Hotkey(hid, mods, vk, getattr(self, method)))
         results = self.hotkeys.start(defs)
-        failed = [name for (name, hid, *_rest) in HOTKEY_DEFS
+        failed = [name for (_a, name, hid, *_rest) in HOTKEY_DEFS
                   if not results.get(hid, False)]
         if failed:
             log.warning("hotkeys unavailable (in use by another app): %s", failed)
+        return results
 
     def set_hotkeys_enabled(self, enabled):
         self.config.set_setting("hotkeys_enabled", enabled)
@@ -251,8 +276,33 @@ class AppController:
             self.hotkeys.stop()
 
     def hotkey_descriptions(self):
-        return [(name, combo) for (name, _id, _m, _vk, _method, combo)
-                in HOTKEY_DEFS]
+        """[(action, name, active combo string)] for the settings page."""
+        return [(action, name, self._hotkey_combo(action, default))
+                for (action, name, _id, default, _m) in HOTKEY_DEFS]
+
+    def set_hotkey_binding(self, action, combo):
+        """Rebind one action. Returns (ok, message). Re-registers live."""
+        if hk.parse_combo(combo) is None:
+            return False, "That key combination can't be used."
+        taken = [a for (a, _n, _i, d, _m) in HOTKEY_DEFS
+                 if a != action and hk.parse_combo(self._hotkey_combo(a, d))
+                 == hk.parse_combo(combo)]
+        if taken:
+            return False, "Already used by another shortcut."
+        bindings = self.config.get_setting("hotkeys", {})
+        bindings[action] = str(combo).strip().lower()
+        self.config.set_setting("hotkeys", bindings)
+        if self.config.get_setting("hotkeys_enabled", True):
+            results = self._register_hotkeys()
+            hid = next(i for (a, _n, i, _d, _m) in HOTKEY_DEFS if a == action)
+            if not results.get(hid, False):
+                return False, "Another app already uses that combination."
+        return True, ""
+
+    def reset_hotkey_bindings(self):
+        self.config.set_setting("hotkeys", {})
+        if self.config.get_setting("hotkeys_enabled", True):
+            self._register_hotkeys()
 
     # -- startup / theme ------------------------------------------------------
 
