@@ -14,9 +14,18 @@ from .app import AppController
 
 def main():
     if "--self-test" in sys.argv:
-        faulthandler.dump_traceback_later(30, exit=True)
+        # A windowed (no-console) exe has no usable stderr/stdout: faulthandler
+        # needs a real file descriptor and print would die. Skip them so the
+        # self-test still reports properly via its exit code.
+        try:
+            faulthandler.dump_traceback_later(30, exit=True)
+        except (AttributeError, ValueError, OSError, RuntimeError):
+            pass
         ok = AppController().self_test()
-        print("self-test:", "PASS" if ok else "FAIL")
+        try:
+            print("self-test:", "PASS" if ok else "FAIL")
+        except OSError:
+            pass
         sys.exit(0 if ok else 1)
     try:
         AppController().run()
