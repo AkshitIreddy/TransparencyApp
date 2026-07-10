@@ -56,7 +56,12 @@ jobs:
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           name: Transparency App ${{ github.event.inputs.tag || github.ref_name }}
-          generate_release_notes: true
+          # Keep releases quiet: no auto-generated announcement, just a
+          # pointer to the changelog.
+          generate_release_notes: false
+          body: >
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)
+            for what changed in this version.
           files: |
             dist/TransparencyApp.exe
             release/TransparencyApp-*.zip
