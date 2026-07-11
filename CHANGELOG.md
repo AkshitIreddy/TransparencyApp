@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [semantic versioning](https://semver.org/).
 
+## [2.1.1] — 2026-07-11
+
+### Changed
+- **The master transparency switch is remembered across launches** — if you
+  turn transparency off, it stays off next time you start the app (it used
+  to always come back on). Panic also leaves it off.
+
 ## [2.1.0] — 2026-07-10
 
 ### Added

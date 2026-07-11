@@ -205,12 +205,17 @@ class TestSettings:
         cfg.set_setting("dimmer_enabled", True)
         cfg.set_setting("focus_mode", {"enabled": True})
         cfg.set_setting("accent", "teal")
+        cfg.set_setting("transparency_on", False)
         cfg.close()
 
         fresh = ConfigManager(path)
         assert fresh.get_setting("dimmer_enabled") is True
         assert fresh.get_setting("focus_mode")["enabled"] is True
         assert fresh.get_setting("accent") == "teal"
+        assert fresh.get_setting("transparency_on") is False
+
+    def test_transparency_defaults_on(self, config):
+        assert config.get_setting("transparency_on") is True
 
     def test_invalid_accent_rejected(self, config):
         config.set_setting("accent", "hotdog")

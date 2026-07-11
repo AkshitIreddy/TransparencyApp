@@ -68,6 +68,8 @@ class AppController:
             self._register_hotkeys()
 
         # Restore the toggles the user left on last session.
+        if not self.config.get_setting("transparency_on", True):
+            self.engine.set_paused(True)
         if self.config.get_setting("focus_mode", {}).get("enabled"):
             self.engine.set_focus_mode(True)
 
@@ -162,6 +164,7 @@ class AppController:
 
     def set_paused(self, paused):
         self.engine.set_paused(paused)
+        self.config.set_setting("transparency_on", not paused)
         self._refresh_indicators()
 
     def toggle_paused(self):
@@ -184,6 +187,7 @@ class AppController:
 
     def panic(self):
         self.engine.panic_restore()
+        self.config.set_setting("transparency_on", False)
         self.config.set_setting("focus_mode", {"enabled": False})
         if self.window:
             self._ui(lambda: self.window.set_pause_state(True))

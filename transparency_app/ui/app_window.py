@@ -79,7 +79,9 @@ class AppWindow(ctk.CTk):
         self.pause_switch = ctk.CTkSwitch(
             bar, text="Transparency on", font=theme.small(),
             progress_color=theme.SUCCESS, command=self._toggle_pause)
-        self.pause_switch.select()
+        # Reflect the state restored from the last session, not a hardcoded on.
+        (self.pause_switch.deselect if self.engine.paused
+         else self.pause_switch.select)()
         self.pause_switch.pack(padx=20, pady=(0, 6), anchor="w")
         Tooltip(self.pause_switch,
                 "Master switch for transparency rules. Off restores windows "

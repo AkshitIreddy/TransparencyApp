@@ -28,6 +28,7 @@ MAX_ALPHA = 255
 DEFAULT_SETTINGS = {
     "theme": "dark",                 # dark | light | system
     "accent": "blue",                # key into theme.ACCENTS
+    "transparency_on": True,         # master switch (engine not paused)
     "hotkeys_enabled": True,
     "start_minimized": False,
     "focus_mode": {
@@ -111,6 +112,7 @@ def _validate_settings(raw):
         settings["theme"] = raw["theme"]
     if raw.get("accent") in ACCENT_NAMES:
         settings["accent"] = raw["accent"]
+    settings["transparency_on"] = bool(raw.get("transparency_on", True))
     settings["hotkeys_enabled"] = bool(raw.get("hotkeys_enabled", True))
     settings["start_minimized"] = bool(raw.get("start_minimized", False))
     settings["dimmer_intensity"] = _clamp(raw.get("dimmer_intensity"), 0, 200, 160)
