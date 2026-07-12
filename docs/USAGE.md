@@ -48,8 +48,10 @@ remembered across launches, like the screen dimmer.
 
 ## Screen dimmer
 
-The **Screen dimmer** lays a soft dark overlay over every monitor to cut glare
-in a dark room. It is click-through, so it never gets in your way.
+The **Screen dimmer** lays a soft dark overlay over your monitors to cut glare
+in a dark room. It is click-through, so it never gets in your way. With more
+than one monitor, the **Screens** section lets you pick which displays it
+covers — all of them, or just the ones you choose.
 
 ## Global hotkeys
 

@@ -77,6 +77,23 @@ class TestQueries:
         assert not winapi.set_window_alpha(hwnd, 100)
 
 
+class TestMonitors:
+    def test_enum_monitors_shape(self):
+        mons = winapi.enum_monitors()
+        assert isinstance(mons, list)
+        # The test host always has at least one display.
+        assert len(mons) >= 1
+        for m in mons:
+            assert set(("name", "rect", "primary", "number", "label")) <= set(m)
+            x, y, w, h = m["rect"]
+            assert w > 0 and h > 0
+        assert sum(1 for m in mons if m["primary"]) <= 1
+
+    def test_enum_monitors_names_unique(self):
+        names = [m["name"] for m in winapi.enum_monitors() if m["name"]]
+        assert len(names) == len(set(names))
+
+
 class TestWinEventHook:
     def _wait_for(self, predicate, timeout=12.0):
         deadline = time.time() + timeout

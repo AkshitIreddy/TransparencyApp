@@ -6,7 +6,7 @@ from tkinter import filedialog
 
 import customtkinter as ctk
 
-from .. import __version__, hotkeys
+from .. import __version__, hotkeys, winapi
 from ..config import (MATCH_PROCESS, MIN_FOCUS_BACKGROUND_ALPHA)
 from ..dimmer import MAX_DIM_ALPHA
 from . import theme
@@ -343,7 +343,7 @@ class AppWindow(ctk.CTk):
     # -- dimmer page ----------------------------------------------------------
 
     def _page_dimmer(self):
-        page = ctk.CTkFrame(self.body, fg_color="transparent")
+        page = ctk.CTkScrollableFrame(self.body, fg_color="transparent")
         page.grid(row=0, column=0, sticky="nsew")
         page.grid_columnconfigure(0, weight=1)
 
@@ -372,6 +372,44 @@ class AppWindow(ctk.CTk):
             button_color=theme.ACCENT, command=self._dimmer_slide)
         self.dimmer_slider.set(intensity)
         self.dimmer_slider.pack(fill="x", padx=16, pady=(2, 16))
+
+        self._build_dimmer_screens(page)
+
+    def _build_dimmer_screens(self, page):
+        monitors = winapi.enum_monitors()
+        # Only worth choosing when there's more than one screen.
+        if len(monitors) < 2:
+            self._dimmer_screen_vars = {}
+            return
+
+        card = self._section(page, "Screens")
+        ctk.CTkLabel(
+            card, wraplength=560, justify="left", font=theme.body(),
+            text_color=theme.TEXT_MUTED,
+            text="Choose which monitors the dimmer covers. Leave all ticked to "
+                 "dim every screen, including any you plug in later."
+        ).pack(anchor="w", padx=16, pady=(0, 10))
+
+        selected = self.config_mgr.get_setting("dimmer_monitors", "all")
+        self._dimmer_screen_vars = {}
+        for m in monitors:
+            checked = (selected == "all") or (m["name"] in selected)
+            var = ctk.BooleanVar(value=checked)
+            self._dimmer_screen_vars[m["name"]] = var
+            w, h = m["rect"][2], m["rect"][3]
+            ctk.CTkCheckBox(
+                card, text=f'{m["label"]}  ·  {w}×{h}', variable=var,
+                font=theme.body(), text_color=theme.TEXT,
+                fg_color=theme.ACCENT, hover_color=theme.ACCENT_HOVER,
+                command=self._on_dimmer_screens).pack(anchor="w", padx=16,
+                                                      pady=4)
+
+    def _on_dimmer_screens(self):
+        names = list(self._dimmer_screen_vars.keys())
+        chosen = [n for n in names if self._dimmer_screen_vars[n].get()]
+        # All ticked -> "all" so future monitors are covered too.
+        value = "all" if len(chosen) == len(names) else chosen
+        self.controller.set_dimmer_monitors(value)
 
     def _toggle_dimmer(self):
         self.controller.set_dimmer_enabled(bool(self.dimmer_switch.get()))

@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [semantic versioning](https://semver.org/).
 
+## [2.1.2] — 2026-07-11
+
+### Added
+- **Per-monitor screen dimmer** — choose which monitors the dimmer covers
+  (all, or a specific subset) under Screen dimmer › Screens. Leaving every
+  screen ticked also dims monitors you plug in later; the choice is
+  remembered across launches. Single-monitor setups are unaffected.
+
 ## [2.1.1] — 2026-07-11
 
 ### Changed

@@ -476,3 +476,50 @@ def get_virtual_screen_rect() -> tuple:
         win32api.GetSystemMetrics(win32con.SM_CXVIRTUALSCREEN),
         win32api.GetSystemMetrics(win32con.SM_CYVIRTUALSCREEN),
     )
+
+
+_MONITORINFOF_PRIMARY = 0x00000001
+
+
+def _display_number(device_name: str):
+    r"""Trailing integer of a display device name (\\.\DISPLAY2 -> 2)."""
+    import re
+    m = re.search(r"(\d+)\s*$", device_name or "")
+    return int(m.group(1)) if m else None
+
+
+def enum_monitors() -> list:
+    r"""Physical monitors as dicts, ordered by Windows' display number.
+
+    Each: {name, number, label, rect (x, y, w, h), primary}. ``name`` is the
+    device name (``\\.\DISPLAY1``) — a stable-enough key to remember a
+    per-monitor selection across launches.
+    """
+    monitors = []
+    try:
+        handles = win32api.EnumDisplayMonitors()
+    except Exception:
+        handles = []
+    for entry in handles:
+        try:
+            hmon = entry[0]
+            info = win32api.GetMonitorInfo(hmon)
+            left, top, right, bottom = info["Monitor"]
+            name = info.get("Device", "") or ""
+            monitors.append({
+                "name": name,
+                "rect": (left, top, right - left, bottom - top),
+                "primary": bool(info.get("Flags", 0) & _MONITORINFOF_PRIMARY),
+            })
+        except Exception:
+            continue
+
+    monitors.sort(key=lambda m: (
+        _display_number(m["name"]) if _display_number(m["name"]) is not None
+        else 999, m["rect"][0], m["rect"][1]))
+    for i, m in enumerate(monitors, 1):
+        num = _display_number(m["name"])
+        num = num if num is not None else i
+        m["number"] = num
+        m["label"] = f"Display {num}" + (" (primary)" if m["primary"] else "")
+    return monitors

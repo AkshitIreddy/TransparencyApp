@@ -25,6 +25,7 @@ class FakeEngine:
 class FakeDimmer:
     enabled = False
     intensity = 120
+    monitors = "all"
 
 
 class FakeController:
@@ -40,6 +41,7 @@ class FakeController:
     def set_focus_mode(self, e): self.engine.focus_mode = e
     def set_dimmer_enabled(self, e): self.dimmer.enabled = e
     def set_dimmer_intensity(self, v): self.dimmer.intensity = v
+    def set_dimmer_monitors(self, v): self.dimmer.monitors = v
     def restore_all(self): pass
     def is_startup_enabled(self): return False
     def set_startup(self, e): return True

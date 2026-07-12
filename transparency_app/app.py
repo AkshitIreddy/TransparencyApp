@@ -40,6 +40,7 @@ class AppController:
         self.engine = TransparencyEngine(self.config, ledger_path=paths.ledger_path())
         self.dimmer = ScreenDimmer()
         self.dimmer.set_intensity(self.config.get_setting("dimmer_intensity", 160))
+        self.dimmer.set_monitors(self.config.get_setting("dimmer_monitors", "all"))
         self.hotkeys = hk.HotkeyManager()
 
         self.window = None
@@ -226,6 +227,10 @@ class AppController:
     def set_dimmer_intensity(self, value):
         self.dimmer.set_intensity(value)
         self.config.set_setting("dimmer_intensity", self.dimmer.intensity)
+
+    def set_dimmer_monitors(self, value):
+        self.dimmer.set_monitors(value)
+        self.config.set_setting("dimmer_monitors", value)
 
     def _restore_dimmer(self):
         """Re-enable the dimmer saved from last session (UI thread only)."""

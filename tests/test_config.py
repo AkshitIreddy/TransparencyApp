@@ -198,6 +198,20 @@ class TestSettings:
     def test_dimmer_defaults(self, config):
         assert config.get_setting("dimmer_intensity") == 160
         assert config.get_setting("dimmer_enabled") is False
+        assert config.get_setting("dimmer_monitors") == "all"
+
+    def test_dimmer_monitors_persist(self, tmp_path):
+        path = str(tmp_path / "config.json")
+        cfg = ConfigManager(path)
+        cfg.set_setting("dimmer_monitors", ["\\\\.\\DISPLAY2", " "])
+        cfg.close()
+        fresh = ConfigManager(path)
+        # Blank entries dropped; the real device name kept.
+        assert fresh.get_setting("dimmer_monitors") == ["\\\\.\\DISPLAY2"]
+
+    def test_dimmer_monitors_bad_value_falls_back_to_all(self, config):
+        config.set_setting("dimmer_monitors", "garbage")
+        assert config.get_setting("dimmer_monitors") == "all"
 
     def test_toggles_persist(self, tmp_path):
         path = str(tmp_path / "config.json")

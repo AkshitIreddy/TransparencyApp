@@ -39,6 +39,7 @@ DEFAULT_SETTINGS = {
     },
     "dimmer_intensity": 160,         # 0..200
     "dimmer_enabled": False,
+    "dimmer_monitors": "all",        # "all" or list of monitor device names
     "hotkeys": {},                   # action -> combo string overrides
 }
 
@@ -117,6 +118,11 @@ def _validate_settings(raw):
     settings["start_minimized"] = bool(raw.get("start_minimized", False))
     settings["dimmer_intensity"] = _clamp(raw.get("dimmer_intensity"), 0, 200, 160)
     settings["dimmer_enabled"] = bool(raw.get("dimmer_enabled", False))
+    dm = raw.get("dimmer_monitors", "all")
+    if isinstance(dm, (list, tuple)):
+        settings["dimmer_monitors"] = [str(x) for x in dm if str(x).strip()]
+    else:
+        settings["dimmer_monitors"] = "all"
     hotkeys = raw.get("hotkeys")
     if isinstance(hotkeys, dict):
         settings["hotkeys"] = {
