@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [semantic versioning](https://semver.org/).
 
+## [2.2.0] — 2026-08-09
+
+### Added
+- **Independent dimming per monitor** — every detected display now has its own
+  intensity slider and enable checkbox, with values remembered across launches.
+- **Automatic updates from GitHub Releases** — the app checks on startup,
+  downloads new versions in the background, verifies GitHub's SHA-256 digest,
+  and installs after approval with a safe restart-and-rollback helper.
+- **Manual update controls** under Settings › Updates, including an option to
+  disable automatic startup checks.
+
 ## [2.1.2] — 2026-07-11
 
 ### Added

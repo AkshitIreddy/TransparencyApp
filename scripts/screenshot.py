@@ -29,6 +29,11 @@ class FakeEngine:
 class FakeDimmer:
     enabled = False
     intensity = 120
+    monitors = "all"
+    intensities = {}
+
+    def intensity_for(self, name):
+        return 72 if str(name).endswith("1") else 156
 
 
 class FakeController:
@@ -37,22 +42,31 @@ class FakeController:
         self.engine = FakeEngine()
         self.dimmer = FakeDimmer()
         self.icon_path = None
+        self.update_state = "idle"
+        self.update_message = "You're up to date."
     def on_close_request(self): pass
     def set_paused(self, p): pass
     def set_focus_mode(self, e): pass
     def set_dimmer_enabled(self, e): pass
     def set_dimmer_intensity(self, v): pass
+    def set_monitor_dimmer_intensity(self, name, v): pass
+    def set_dimmer_monitors(self, v): pass
     def restore_all(self): pass
     def is_startup_enabled(self): return True
     def set_startup(self, e): return True
     def set_hotkeys_enabled(self, e): pass
+    def set_update_checks_enabled(self, e): pass
+    def check_for_updates(self, manual=False): pass
+    def install_ready_update(self): pass
     def apply_theme(self, m): pass
     def hotkey_descriptions(self):
-        return [("Toggle transparency", "Ctrl+Alt+T"),
-                ("Toggle focus mode", "Ctrl+Alt+F"),
-                ("More opaque", "Ctrl+Alt+↑"),
-                ("More transparent", "Ctrl+Alt+↓"),
-                ("Restore everything", "Ctrl+Alt+Home")]
+        return [("toggle", "Toggle transparency", "ctrl+alt+t"),
+                ("focus", "Toggle focus mode", "ctrl+alt+f"),
+                ("up", "More opaque", "ctrl+alt+up"),
+                ("down", "More transparent", "ctrl+alt+down"),
+                ("panic", "Restore everything", "ctrl+alt+home")]
+    def set_hotkey_binding(self, action, combo): return True, ""
+    def reset_hotkey_bindings(self): pass
 
 
 def main():
@@ -66,6 +80,8 @@ def main():
     cfg.add_rule("Spotify", opacity=180, match_mode=MATCH_TITLE)
 
     win = AppWindow(FakeController(cfg))
+    page = sys.argv[2] if len(sys.argv) > 2 else "rules"
+    win.show_page(page)
     win.geometry("960x680+120+80")
     # Force our window above everything else so the capture is only our UI
     # (and never whatever private content happens to be behind it).

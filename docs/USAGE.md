@@ -49,9 +49,16 @@ remembered across launches, like the screen dimmer.
 ## Screen dimmer
 
 The **Screen dimmer** lays a soft dark overlay over your monitors to cut glare
-in a dark room. It is click-through, so it never gets in your way. With more
-than one monitor, the **Screens** section lets you pick which displays it
-covers — all of them, or just the ones you choose.
+in a dark room. It is click-through, so it never gets in your way. Each detected
+display has its own dimming slider, so one screen can stay bright while another
+is heavily dimmed. Untick a display to leave it completely unchanged.
+
+## Updates
+
+Transparency App checks GitHub Releases shortly after startup. When a newer
+version is available, it downloads the portable executable in the background,
+verifies GitHub's SHA-256 digest, and asks before restarting into the update.
+Use **Settings → Updates** to check manually or disable startup checks.
 
 ## Global hotkeys
 

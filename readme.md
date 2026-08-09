@@ -33,7 +33,8 @@ tray.
 - 🗂️ **Presets** — save rule sets and switch between them (Work, Gaming, …).
 - 🫥 **Focus mode** — dim every window except the one you're using; it follows
   your focus automatically.
-- 🌒 **Screen dimmer** — a soft, click-through overlay across all monitors.
+- 🌒 **Per-monitor screen dimmer** — set a different click-through dimming
+  level for every display, or leave selected screens unchanged.
 - ⌨️ **Global hotkeys** — toggle transparency/focus, nudge opacity, or restore
   everything with one keystroke. Every shortcut is remappable in Settings.
 - 🖱️ **Per-rule click-through & always-on-top.**
@@ -46,6 +47,10 @@ tray.
    [latest release](https://github.com/AkshitIreddy/TransparencyApp/releases/latest).
 2. Double-click it to run. That's it — no installer, no admin rights.
 3. (Optional) Turn on **Settings → Start with Windows** to launch at sign-in.
+
+After installation, the app checks GitHub Releases in the background. New
+versions are downloaded, SHA-256 verified, and installed after you approve the
+restart. You can also use **Settings → Updates → Check now** at any time.
 
 > Windows SmartScreen may warn about a new unsigned app. Choose
 > **More info → Run anyway**. The full source is in this repo and the
