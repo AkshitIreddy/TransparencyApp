@@ -31,6 +31,7 @@ DEFAULT_SETTINGS = {
     "transparency_on": True,         # master switch (engine not paused)
     "hotkeys_enabled": True,
     "start_minimized": False,
+    "check_updates_on_startup": True,
     "focus_mode": {
         "enabled": False,
         "active_opacity": 255,
@@ -117,6 +118,8 @@ def _validate_settings(raw):
     settings["transparency_on"] = bool(raw.get("transparency_on", True))
     settings["hotkeys_enabled"] = bool(raw.get("hotkeys_enabled", True))
     settings["start_minimized"] = bool(raw.get("start_minimized", False))
+    settings["check_updates_on_startup"] = bool(
+        raw.get("check_updates_on_startup", True))
     settings["dimmer_intensity"] = _clamp(raw.get("dimmer_intensity"), 0, 200, 160)
     dimmer_intensities = raw.get("dimmer_intensities")
     if isinstance(dimmer_intensities, dict):

@@ -7,9 +7,12 @@ loop with ``root.after``. The engine and config are internally thread-safe.
 """
 
 import logging
+import os
+import sys
+import threading
 
 from . import hotkeys as hk
-from . import paths, startup, winapi
+from . import paths, startup, updater, winapi
 from .config import ConfigManager
 from .dimmer import ScreenDimmer
 from .engine import TransparencyEngine
@@ -48,6 +51,11 @@ class AppController:
         self.window = None
         self.tray = None
         self._dimmer_tick_id = None
+        self.update_state = "idle"
+        self.update_message = "Updates are checked automatically."
+        self._update_info = None
+        self._staged_update = None
+        self._update_lock = threading.Lock()
 
     def _resolve_icon(self):
         for name in ("icon.ico", "assets/icon.ico"):
@@ -86,6 +94,9 @@ class AppController:
 
         if self.config.get_setting("start_minimized", False):
             self.window.after(200, self.hide_window)
+
+        if self.config.get_setting("check_updates_on_startup", True):
+            self.window.after(1500, self.check_for_updates)
 
         try:
             self.window.mainloop()
@@ -333,6 +344,73 @@ class AppController:
     def apply_theme(self, mode):
         from .ui import theme
         theme.apply_appearance(mode)
+
+    # -- updates -------------------------------------------------------------
+
+    def set_update_checks_enabled(self, enabled):
+        self.config.set_setting("check_updates_on_startup", bool(enabled))
+
+    def _set_update_state(self, state, message):
+        self.update_state = state
+        self.update_message = message
+        if self.window:
+            self._ui(lambda: self.window.set_update_state(state, message))
+
+    def check_for_updates(self, manual=False):
+        if not self._update_lock.acquire(blocking=False):
+            return
+        self._set_update_state("checking", "Checking GitHub Releases…")
+
+        def worker():
+            try:
+                release = updater.check_for_update()
+                if release is None:
+                    self._set_update_state("current", "You're up to date.")
+                    return
+                self._update_info = release
+                self._set_update_state(
+                    "downloading", f"Downloading v{release.version}…")
+                destination = updater.staged_update_path(release.version)
+
+                def progress(done, total):
+                    percent = round(done / total * 100) if total else 0
+                    self._set_update_state(
+                        "downloading",
+                        f"Downloading v{release.version}… {percent}%")
+
+                self._staged_update = updater.download_update(
+                    release, destination, progress=progress)
+                self._set_update_state(
+                    "ready", f"v{release.version} is ready to install.")
+                if self.window:
+                    self._ui(lambda: self.window.offer_update(release.version))
+            except updater.UpdateError as exc:
+                log.warning("update check failed: %s", exc)
+                message = (str(exc) if manual else
+                           "Automatic update check failed. Try again later.")
+                self._set_update_state("error", message)
+            finally:
+                self._update_lock.release()
+
+        threading.Thread(target=worker, name="AppUpdater", daemon=True).start()
+
+    def install_ready_update(self):
+        if not self._staged_update or not self._update_info:
+            self.check_for_updates(manual=True)
+            return
+        if not getattr(sys, "frozen", False):
+            self._set_update_state(
+                "error", "Updates can only install from the packaged app.")
+            return
+        try:
+            updater.launch_installer(
+                self._staged_update, os.path.abspath(sys.executable))
+        except updater.UpdateError as exc:
+            self._set_update_state("error", str(exc))
+            return
+        self._set_update_state("installing", "Restarting to finish the update…")
+        if self.window:
+            self.window.after(150, self._quit_impl)
 
     def quit(self):
         self._ui(self._quit_impl)

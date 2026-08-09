@@ -2,7 +2,7 @@
 Settings pages. Talks to the controller for anything that touches the OS."""
 
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
@@ -479,6 +479,31 @@ class AppWindow(ctk.CTk):
             self.config_mgr.get_setting("hotkeys_enabled", True),
             self._toggle_hotkeys)
 
+        updates = self._section(page, "Updates")
+        self._switch_row(
+            updates, "Automatically check for updates",
+            "Download verified releases from GitHub when the app starts.",
+            self.config_mgr.get_setting("check_updates_on_startup", True),
+            self.controller.set_update_checks_enabled)
+        update_row = ctk.CTkFrame(updates, fg_color="transparent")
+        update_row.pack(fill="x", padx=16, pady=(4, 8))
+        self._update_status_label = ctk.CTkLabel(
+            update_row,
+            text=getattr(self.controller, "update_message",
+                         "Updates are checked automatically."),
+            font=theme.small(), text_color=theme.TEXT_MUTED, anchor="w")
+        self._update_status_label.pack(side="left", fill="x", expand=True)
+        self._update_button = ctk.CTkButton(
+            update_row, text="Check now", width=124, height=32,
+            font=theme.small(), fg_color=theme.SURFACE_2,
+            hover_color=theme.BORDER, text_color=theme.TEXT,
+            command=lambda: self.controller.check_for_updates(manual=True))
+        self._update_button.pack(side="right")
+        self.set_update_state(
+            getattr(self.controller, "update_state", "idle"),
+            getattr(self.controller, "update_message",
+                    "Updates are checked automatically."))
+
         hot = self._section(page, "Keyboard shortcuts")
         ctk.CTkLabel(
             hot, wraplength=560, justify="left", font=theme.small(),
@@ -605,6 +630,33 @@ class AppWindow(ctk.CTk):
 
     def _toggle_hotkeys(self, enabled):
         self.controller.set_hotkeys_enabled(enabled)
+
+    def set_update_state(self, state, message):
+        label = getattr(self, "_update_status_label", None)
+        button = getattr(self, "_update_button", None)
+        if label is None or not label.winfo_exists() or button is None:
+            return
+        label.configure(text=message)
+        if state == "ready":
+            button.configure(
+                text="Install & restart", state="normal",
+                command=self.controller.install_ready_update)
+        elif state in ("checking", "downloading", "installing"):
+            button.configure(text="Please wait…", state="disabled")
+        else:
+            button.configure(
+                text="Check now", state="normal",
+                command=lambda: self.controller.check_for_updates(manual=True))
+
+    def offer_update(self, version):
+        self.deiconify()
+        self.lift()
+        if messagebox.askyesno(
+                "Transparency App update",
+                f"Version {version} has been downloaded and verified.\n\n"
+                "Install it and restart Transparency App now?",
+                parent=self):
+            self.controller.install_ready_update()
 
     def _export(self):
         path = filedialog.asksaveasfilename(

@@ -38,6 +38,8 @@ class FakeController:
         self.engine = FakeEngine()
         self.dimmer = FakeDimmer()
         self.icon_path = None
+        self.update_state = "idle"
+        self.update_message = "Updates are checked automatically."
 
     # every action the window can call — all no-ops
     def on_close_request(self): pass
@@ -52,6 +54,11 @@ class FakeController:
     def is_startup_enabled(self): return False
     def set_startup(self, e): return True
     def set_hotkeys_enabled(self, e): pass
+    def set_update_checks_enabled(self, e):
+        self.config.set_setting("check_updates_on_startup", e)
+    def check_for_updates(self, manual=False):
+        self.last_manual_update_check = manual
+    def install_ready_update(self): self.update_state = "installing"
     def apply_theme(self, m): pass
     def hotkey_descriptions(self):
         return [("toggle_transparency", "Toggle transparency", "ctrl+alt+t"),
@@ -112,3 +119,11 @@ def test_pause_switch_reflects_state(app):
     assert app.pause_switch.get() == 0  # off = paused
     app.set_pause_state(False)
     assert app.pause_switch.get() == 1
+
+
+def test_update_controls_reflect_ready_state(app):
+    app.show_page("settings")
+    app.set_update_state("ready", "v9.0.0 is ready to install.")
+    app.update_idletasks()
+    assert app._update_status_label.cget("text") == "v9.0.0 is ready to install."
+    assert app._update_button.cget("text") == "Install & restart"
