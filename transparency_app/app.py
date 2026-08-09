@@ -40,6 +40,8 @@ class AppController:
         self.engine = TransparencyEngine(self.config, ledger_path=paths.ledger_path())
         self.dimmer = ScreenDimmer()
         self.dimmer.set_intensity(self.config.get_setting("dimmer_intensity", 160))
+        self.dimmer.set_intensities(
+            self.config.get_setting("dimmer_intensities", {}))
         self.dimmer.set_monitors(self.config.get_setting("dimmer_monitors", "all"))
         self.hotkeys = hk.HotkeyManager()
 
@@ -116,6 +118,7 @@ class AppController:
         log.info("shutting down")
         try:
             self.config.set_setting("dimmer_intensity", self.dimmer.intensity)
+            self.config.set_setting("dimmer_intensities", self.dimmer.intensities)
         except Exception:
             pass
         for closer in (self.hotkeys.stop, self.dimmer.destroy,
@@ -227,6 +230,10 @@ class AppController:
     def set_dimmer_intensity(self, value):
         self.dimmer.set_intensity(value)
         self.config.set_setting("dimmer_intensity", self.dimmer.intensity)
+
+    def set_monitor_dimmer_intensity(self, monitor_name, value):
+        self.dimmer.set_monitor_intensity(monitor_name, value)
+        self.config.set_setting("dimmer_intensities", self.dimmer.intensities)
 
     def set_dimmer_monitors(self, value):
         self.dimmer.set_monitors(value)

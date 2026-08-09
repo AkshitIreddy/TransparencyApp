@@ -362,47 +362,58 @@ class AppWindow(ctk.CTk):
          else self.dimmer_switch.deselect)()
         self.dimmer_switch.pack(anchor="w", padx=16, pady=(0, 14))
 
-        intensity = self.controller.dimmer.intensity
-        self.dimmer_lbl = ctk.CTkLabel(
-            card, text=f"Dimming — {round(intensity / MAX_DIM_ALPHA * 100)}%",
-            font=theme.small(), text_color=theme.TEXT_MUTED)
-        self.dimmer_lbl.pack(anchor="w", padx=16)
-        self.dimmer_slider = ctk.CTkSlider(
-            card, from_=0, to=MAX_DIM_ALPHA, progress_color=theme.ACCENT,
-            button_color=theme.ACCENT, command=self._dimmer_slide)
-        self.dimmer_slider.set(intensity)
-        self.dimmer_slider.pack(fill="x", padx=16, pady=(2, 16))
-
         self._build_dimmer_screens(page)
 
     def _build_dimmer_screens(self, page):
         monitors = winapi.enum_monitors()
-        # Only worth choosing when there's more than one screen.
-        if len(monitors) < 2:
-            self._dimmer_screen_vars = {}
-            return
-
-        card = self._section(page, "Screens")
+        card = self._section(page, "Per-screen dimming")
         ctk.CTkLabel(
             card, wraplength=560, justify="left", font=theme.body(),
             text_color=theme.TEXT_MUTED,
-            text="Choose which monitors the dimmer covers. Leave all ticked to "
-                 "dim every screen, including any you plug in later."
+            text="Set a different dimming level for each display. Untick a "
+                 "display to leave it completely unchanged."
         ).pack(anchor="w", padx=16, pady=(0, 10))
+
+        if not monitors:
+            ctk.CTkLabel(card, text="No displays detected.", font=theme.body(),
+                         text_color=theme.TEXT_MUTED).pack(
+                             anchor="w", padx=16, pady=(0, 10))
+            self._dimmer_screen_vars = {}
+            return
 
         selected = self.config_mgr.get_setting("dimmer_monitors", "all")
         self._dimmer_screen_vars = {}
+        self._dimmer_intensity_labels = {}
+        self._dimmer_intensity_sliders = {}
         for m in monitors:
             checked = (selected == "all") or (m["name"] in selected)
             var = ctk.BooleanVar(value=checked)
             self._dimmer_screen_vars[m["name"]] = var
             w, h = m["rect"][2], m["rect"][3]
+            row = ctk.CTkFrame(card, fg_color=theme.SURFACE_2,
+                               corner_radius=theme.RADIUS_SM)
+            row.pack(fill="x", padx=16, pady=5)
+            head = ctk.CTkFrame(row, fg_color="transparent")
+            head.pack(fill="x", padx=12, pady=(10, 2))
             ctk.CTkCheckBox(
-                card, text=f'{m["label"]}  ·  {w}×{h}', variable=var,
+                head, text=f'{m["label"]}  ·  {w}×{h}', variable=var,
                 font=theme.body(), text_color=theme.TEXT,
                 fg_color=theme.ACCENT, hover_color=theme.ACCENT_HOVER,
-                command=self._on_dimmer_screens).pack(anchor="w", padx=16,
-                                                      pady=4)
+                command=self._on_dimmer_screens).pack(side="left")
+            intensity = self.controller.dimmer.intensity_for(m["name"])
+            label = ctk.CTkLabel(
+                head, text=f"{round(intensity / MAX_DIM_ALPHA * 100)}%",
+                width=44, font=theme.small(), text_color=theme.TEXT_MUTED)
+            label.pack(side="right")
+            self._dimmer_intensity_labels[m["name"]] = label
+            slider = ctk.CTkSlider(
+                row, from_=0, to=MAX_DIM_ALPHA, progress_color=theme.ACCENT,
+                button_color=theme.ACCENT,
+                command=lambda value, name=m["name"]:
+                    self._monitor_dimmer_slide(name, value))
+            slider.set(intensity)
+            slider.pack(fill="x", padx=12, pady=(4, 12))
+            self._dimmer_intensity_sliders[m["name"]] = slider
 
     def _on_dimmer_screens(self):
         names = list(self._dimmer_screen_vars.keys())
@@ -414,11 +425,12 @@ class AppWindow(ctk.CTk):
     def _toggle_dimmer(self):
         self.controller.set_dimmer_enabled(bool(self.dimmer_switch.get()))
 
-    def _dimmer_slide(self, value):
+    def _monitor_dimmer_slide(self, monitor_name, value):
         alpha = int(float(value))
-        self.dimmer_lbl.configure(
-            text=f"Dimming — {round(alpha / MAX_DIM_ALPHA * 100)}%")
-        self.controller.set_dimmer_intensity(alpha)
+        label = self._dimmer_intensity_labels.get(monitor_name)
+        if label is not None:
+            label.configure(text=f"{round(alpha / MAX_DIM_ALPHA * 100)}%")
+        self.controller.set_monitor_dimmer_intensity(monitor_name, alpha)
 
     # -- settings page --------------------------------------------------------
 

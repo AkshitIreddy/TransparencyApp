@@ -62,6 +62,24 @@ class TestPersistence:
         assert fresh.list_presets() == ["My preset"]
         assert fresh.get_setting("theme") == "light"
 
+    def test_per_monitor_dimmer_intensities_are_validated(self, tmp_path):
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({"settings": {
+            "dimmer_intensity": 111,
+            "dimmer_intensities": {
+                r"\\.\DISPLAY1": 42,
+                r"\\.\DISPLAY2": 999,
+                "": 17,
+                "bad": "not-a-number",
+            },
+        }}))
+        cfg = ConfigManager(str(path))
+        assert cfg.get_setting("dimmer_intensities") == {
+            r"\\.\DISPLAY1": 42,
+            r"\\.\DISPLAY2": 200,
+            "bad": 111,
+        }
+
     def test_v1_migration(self, tmp_path):
         path = tmp_path / "config.json"
         path.write_text(json.dumps({"windows": {"visual studio code": 230,

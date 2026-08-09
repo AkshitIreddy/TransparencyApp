@@ -69,7 +69,8 @@ def _rect_contains(rect, point):
 class ScreenDimmer:
     def __init__(self):
         self._overlays = {}     # monitor device name -> overlay hwnd
-        self._intensity = 160   # 0..MAX_DIM_ALPHA
+        self._intensity = 160   # fallback for newly connected monitors
+        self._intensities = {}  # monitor device name -> 0..MAX_DIM_ALPHA
         self.enabled = False
         self._monitors = "all"  # "all", or a list of monitor device names
 
@@ -80,6 +81,36 @@ class ScreenDimmer:
     @property
     def monitors(self):
         return self._monitors
+
+    @property
+    def intensities(self):
+        return dict(self._intensities)
+
+    def intensity_for(self, monitor_name) -> int:
+        return self._intensities.get(str(monitor_name), self._intensity)
+
+    def set_intensities(self, value):
+        """Set remembered per-monitor levels, preserving the global fallback."""
+        if isinstance(value, dict):
+            self._intensities = {
+                str(name): max(0, min(MAX_DIM_ALPHA, int(intensity)))
+                for name, intensity in value.items()
+                if str(name).strip()
+            }
+        else:
+            self._intensities = {}
+        if self.enabled:
+            self._rebuild()
+
+    def set_monitor_intensity(self, monitor_name, value):
+        name = str(monitor_name)
+        if not name:
+            return
+        self._intensities[name] = max(0, min(MAX_DIM_ALPHA, int(value)))
+        hwnd = self._overlays.get(name)
+        if self.enabled and hwnd and win32gui.IsWindow(hwnd):
+            ctypes.windll.user32.SetLayeredWindowAttributes(
+                hwnd, 0, self._alpha(name), win32con.LWA_ALPHA)
 
     def set_monitors(self, value):
         """Choose coverage: "all", or a list of monitor device names."""
@@ -142,10 +173,12 @@ class ScreenDimmer:
             rects[m["name"]] = (x, y, w, h)
         return rects
 
-    def _alpha(self) -> int:
-        return max(0, min(MAX_DIM_ALPHA, self._intensity))
+    def _alpha(self, monitor_name=None) -> int:
+        value = (self.intensity_for(monitor_name)
+                 if monitor_name is not None else self._intensity)
+        return max(0, min(MAX_DIM_ALPHA, value))
 
-    def _create(self, rect):
+    def _create(self, monitor_name, rect):
         self._register_class()
         x, y, width, height = rect
         ex_style = (win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT
@@ -158,19 +191,19 @@ class ScreenDimmer:
         if not hwnd:
             return None
         ctypes.windll.user32.SetLayeredWindowAttributes(
-            hwnd, 0, self._alpha(), win32con.LWA_ALPHA)
+            hwnd, 0, self._alpha(monitor_name), win32con.LWA_ALPHA)
         win32gui.SetWindowPos(
             hwnd, win32con.HWND_TOPMOST, x, y, width, height,
             win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE)
         return hwnd
 
-    def _reassert(self, hwnd, rect):
+    def _reassert(self, monitor_name, hwnd, rect):
         x, y, width, height = rect
         win32gui.SetWindowPos(
             hwnd, win32con.HWND_TOPMOST, x, y, width, height,
             win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE)
         ctypes.windll.user32.SetLayeredWindowAttributes(
-            hwnd, 0, self._alpha(), win32con.LWA_ALPHA)
+            hwnd, 0, self._alpha(monitor_name), win32con.LWA_ALPHA)
 
     def _destroy_one(self, name):
         hwnd = self._overlays.pop(name, None)
@@ -190,9 +223,9 @@ class ScreenDimmer:
         for name, rect in rects.items():
             hwnd = self._overlays.get(name)
             if hwnd is None or not win32gui.IsWindow(hwnd):
-                self._overlays[name] = self._create(rect)
+                self._overlays[name] = self._create(name, rect)
             else:
-                self._reassert(hwnd, rect)
+                self._reassert(name, hwnd, rect)
 
     def set_enabled(self, enabled: bool):
         self.enabled = bool(enabled)
@@ -204,12 +237,13 @@ class ScreenDimmer:
                     win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
 
     def set_intensity(self, value: int):
+        """Set the fallback used for monitors without a saved level."""
         self._intensity = max(0, min(MAX_DIM_ALPHA, int(value)))
         if self.enabled:
-            for hwnd in self._overlays.values():
+            for name, hwnd in self._overlays.items():
                 if hwnd and win32gui.IsWindow(hwnd):
                     ctypes.windll.user32.SetLayeredWindowAttributes(
-                        hwnd, 0, self._alpha(), win32con.LWA_ALPHA)
+                        hwnd, 0, self._alpha(name), win32con.LWA_ALPHA)
 
     def tick(self):
         """Call periodically (e.g. every 2 s from the UI) while enabled to keep

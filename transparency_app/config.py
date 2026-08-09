@@ -38,6 +38,7 @@ DEFAULT_SETTINGS = {
         "exclude": [],               # process names to leave alone
     },
     "dimmer_intensity": 160,         # 0..200
+    "dimmer_intensities": {},        # monitor device name -> 0..200
     "dimmer_enabled": False,
     "dimmer_monitors": "all",        # "all" or list of monitor device names
     "hotkeys": {},                   # action -> combo string overrides
@@ -117,6 +118,13 @@ def _validate_settings(raw):
     settings["hotkeys_enabled"] = bool(raw.get("hotkeys_enabled", True))
     settings["start_minimized"] = bool(raw.get("start_minimized", False))
     settings["dimmer_intensity"] = _clamp(raw.get("dimmer_intensity"), 0, 200, 160)
+    dimmer_intensities = raw.get("dimmer_intensities")
+    if isinstance(dimmer_intensities, dict):
+        settings["dimmer_intensities"] = {
+            str(name): _clamp(value, 0, 200, settings["dimmer_intensity"])
+            for name, value in dimmer_intensities.items()
+            if str(name).strip()
+        }
     settings["dimmer_enabled"] = bool(raw.get("dimmer_enabled", False))
     dm = raw.get("dimmer_monitors", "all")
     if isinstance(dm, (list, tuple)):
