@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [semantic versioning](https://semver.org/).
 
+## [2.2.2] — 2026-08-21
+
+### Added
+- **Visible update notifications** — verified GitHub updates now raise a native
+  Windows notification and add an install action to the tray menu. Automatic
+  checks no longer force the main window open, while manual checks still offer
+  immediate installation.
+
+### Fixed
+- **Complete Windows shell dimming** — Start, the taskbar and shell flyouts can
+  no longer jump above the screen-dimming overlay when they open or reorder.
+
 ## [2.2.1] — 2026-08-21
 
 ### Fixed

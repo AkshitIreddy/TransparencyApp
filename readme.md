@@ -35,7 +35,8 @@ tray.
   your focus automatically.
 - 🌒 **Per-monitor screen dimmer** — set a different click-through dimming
   level for every display, or leave selected screens unchanged. The overlay is
-  automatically left out of Snipping Tool screenshots and screen captures.
+  automatically left out of Snipping Tool screenshots and screen captures,
+  while still covering Start, the taskbar, and Windows shell flyouts.
 - ⌨️ **Global hotkeys** — toggle transparency/focus, nudge opacity, or restore
   everything with one keystroke. Every shortcut is remappable in Settings.
 - 🖱️ **Per-rule click-through & always-on-top.**
@@ -51,7 +52,9 @@ tray.
 
 After installation, the app checks GitHub Releases in the background. New
 versions are downloaded, SHA-256 verified, and installed after you approve the
-restart. You can also use **Settings → Updates → Check now** at any time.
+restart. A native Windows notification and tray-menu action appear when a
+verified update is ready. You can also use **Settings → Updates → Check now**
+at any time.
 
 > Windows SmartScreen may warn about a new unsigned app. Choose
 > **More info → Run anyway**. The full source is in this repo and the

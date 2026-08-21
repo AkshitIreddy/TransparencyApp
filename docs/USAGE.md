@@ -53,14 +53,17 @@ in a dark room. It is click-through, so it never gets in your way. Each detected
 display has its own dimming slider, so one screen can stay bright while another
 is heavily dimmed. Untick a display to leave it completely unchanged. Snipping
 Tool and compatible Windows capture apps leave the dimmer out, so screenshots
-retain the screen's original, undimmed brightness.
+retain the screen's original, undimmed brightness. Start, the taskbar, and
+Windows shell flyouts remain visually dimmed when they open.
 
 ## Updates
 
 Transparency App checks GitHub Releases shortly after startup. When a newer
 version is available, it downloads the portable executable in the background,
-verifies GitHub's SHA-256 digest, and asks before restarting into the update.
-Use **Settings → Updates** to check manually or disable startup checks.
+verifies GitHub's SHA-256 digest, and shows a native Windows notification plus
+an install action in the tray menu. Automatic checks do not interrupt your
+work; a manual check offers installation immediately. Use **Settings →
+Updates** to check manually or disable startup checks.
 
 ## Global hotkeys
 
