@@ -11,6 +11,8 @@ thread's messages, which keeps the overlay windows responsive.
 
 import ctypes
 import ctypes.wintypes as wintypes
+import json
+import os
 import sys
 
 import win32api
@@ -32,6 +34,7 @@ _TASKBAR_GAP_PX = 2
 # Windows builds the same value degrades to WDA_MONITOR, which would replace the
 # overlay with a black rectangle in captures, so do not apply it there.
 WDA_EXCLUDEFROMCAPTURE = 0x00000011
+WDA_NONE = 0x00000000
 _CAPTURE_EXCLUSION_MIN_BUILD = 19041
 
 _SetWindowDisplayAffinity = ctypes.windll.user32.SetWindowDisplayAffinity
@@ -39,20 +42,21 @@ _SetWindowDisplayAffinity.argtypes = [wintypes.HWND, wintypes.DWORD]
 _SetWindowDisplayAffinity.restype = wintypes.BOOL
 
 _WINDOW_CLASS = "TransparencyAppDimmer"
-_WM_REASSERT_TOPMOST = win32con.WM_APP + 1
+_WM_SHELL_CHANGED = win32con.WM_APP + 1
 _class_registered = False
+_overlay_owners = {}
+
+_TASKBAR_CLASSES = {"Shell_TrayWnd", "Shell_SecondaryTrayWnd"}
+_CAPTURE_PROCESSES = {"screenclippinghost.exe"}
+_SNIPPING_PROCESS = "snippingtool.exe"
 
 
 def _overlay_wnd_proc(hwnd, message, wparam, lparam):
-    """Keep shell surfaces opened later from overtaking a dimmer overlay."""
-    if message == _WM_REASSERT_TOPMOST:
-        try:
-            win32gui.SetWindowPos(
-                hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
-                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE |
-                win32con.SWP_NOACTIVATE | win32con.SWP_NOOWNERZORDER)
-        except win32gui.error:
-            pass
+    """Run shell/capture reconciliation on the overlay's UI thread."""
+    if message == _WM_SHELL_CHANGED:
+        owner = _overlay_owners.get(hwnd)
+        if owner is not None:
+            owner._handle_shell_change_ui()
         return 0
     return win32gui.DefWindowProc(hwnd, message, wparam, lparam)
 
@@ -104,27 +108,61 @@ def _capture_exclusion_supported():
         return False
 
 
-def _exclude_from_capture(hwnd):
-    """Keep an owned top-level window visible locally but out of captures."""
-    if not hwnd or not _capture_exclusion_supported():
+def _set_capture_excluded(hwnd, excluded):
+    """Toggle screenshot exclusion without changing local display output."""
+    if not hwnd:
+        return False
+    if excluded and not _capture_exclusion_supported():
         return False
     try:
         return bool(_SetWindowDisplayAffinity(
-            wintypes.HWND(hwnd), WDA_EXCLUDEFROMCAPTURE))
+            wintypes.HWND(hwnd),
+            WDA_EXCLUDEFROMCAPTURE if excluded else WDA_NONE))
     except (AttributeError, OSError, ValueError):
-        # Dimming is still useful if display affinity is unavailable. Avoid
-        # failing overlay creation on unusual or unsupported Windows setups.
         return False
 
 
+def _is_capture_surface(process, class_name, title, rect, virtual_rect):
+    """Identify only transient Windows capture surfaces, not the editor UI."""
+    process = (process or "").lower()
+    class_name = (class_name or "").lower()
+    title = (title or "").lower()
+    if process in _CAPTURE_PROCESSES:
+        return True
+    if process != _SNIPPING_PROCESS:
+        return False
+    if "capture" in class_name or "snipper" in class_name:
+        return True
+    x, y, width, height = virtual_rect
+    left, top, right, bottom = rect
+    area = max(0, right - left) * max(0, bottom - top)
+    desktop_area = max(1, width * height)
+    return (area >= desktop_area * 0.45 and
+            title not in {"snipping tool", "snipping tool settings"})
+
+
 class ScreenDimmer:
-    def __init__(self):
+    def __init__(self, taskbar_ledger_path=None):
         self._overlays = {}     # monitor device name -> overlay hwnd
         self._intensity = 160   # fallback for newly connected monitors
         self._intensities = {}  # monitor device name -> 0..MAX_DIM_ALPHA
         self.enabled = False
         self._monitors = "all"  # "all", or a list of monitor device names
-        self._z_order_hook = winapi.WinEventHook(self._on_shell_event)
+        self._capture_active = False
+        self._taskbars = {}  # taskbar hwnd -> original style + black backdrop
+        self._taskbar_ledger_path = taskbar_ledger_path
+        self._recover_taskbars()
+        self._z_order_hook = winapi.WinEventHook(
+            self._on_shell_event,
+            events=(
+                winapi.EVENT_SYSTEM_FOREGROUND,
+                winapi.EVENT_OBJECT_CREATE,
+                winapi.EVENT_OBJECT_DESTROY,
+                winapi.EVENT_OBJECT_SHOW,
+                winapi.EVENT_OBJECT_REORDER,
+                winapi.EVENT_OBJECT_LOCATIONCHANGE,
+                winapi.EVENT_OBJECT_UNCLOAKED,
+            ))
 
     @property
     def intensity(self) -> int:
@@ -163,6 +201,7 @@ class ScreenDimmer:
         if self.enabled and hwnd and win32gui.IsWindow(hwnd):
             ctypes.windll.user32.SetLayeredWindowAttributes(
                 hwnd, 0, self._alpha(name), win32con.LWA_ALPHA)
+            self._sync_taskbars()
 
     def set_monitors(self, value):
         """Choose coverage: "all", or a list of monitor device names."""
@@ -244,10 +283,11 @@ class ScreenDimmer:
             return None
         ctypes.windll.user32.SetLayeredWindowAttributes(
             hwnd, 0, self._alpha(monitor_name), win32con.LWA_ALPHA)
-        _exclude_from_capture(hwnd)
+        _set_capture_excluded(hwnd, self._capture_active)
         win32gui.SetWindowPos(
             hwnd, win32con.HWND_TOPMOST, x, y, width, height,
             win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE)
+        _overlay_owners[hwnd] = self
         return hwnd
 
     def _reassert(self, monitor_name, hwnd, rect):
@@ -257,27 +297,235 @@ class ScreenDimmer:
             win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE)
         ctypes.windll.user32.SetLayeredWindowAttributes(
             hwnd, 0, self._alpha(monitor_name), win32con.LWA_ALPHA)
+        _set_capture_excluded(hwnd, self._capture_active)
 
     def _on_shell_event(self, _event, _hwnd):
-        """Request a UI-thread z-order refresh after another window surfaces.
-
-        Start, taskbar flyouts and other topmost shell windows can be created
-        after the monitor overlays. Posting to the owned overlay windows keeps
-        the native hook callback non-blocking and lets their UI thread restore
-        the intended ordering immediately.
-        """
+        """Coalesce foreign shell changes onto the dimmer's UI thread."""
         if not self.enabled:
             return
-        for overlay in tuple(self._overlays.values()):
-            if overlay:
+        overlay = next((hwnd for hwnd in tuple(self._overlays.values())
+                        if hwnd and win32gui.IsWindow(hwnd)), None)
+        if overlay:
+            try:
+                win32gui.PostMessage(overlay, _WM_SHELL_CHANGED, 0, 0)
+            except win32gui.error:
+                pass
+
+    def _handle_shell_change_ui(self):
+        if not self.enabled:
+            return
+        self._set_capture_active(self._capture_ui_active())
+        self._rebuild()
+
+    def _capture_ui_active(self):
+        virtual_rect = winapi.get_virtual_screen_rect()
+        active = False
+
+        def callback(hwnd, _):
+            nonlocal active
+            if active or not win32gui.IsWindowVisible(hwnd):
+                return not active
+            try:
+                rect = win32gui.GetWindowRect(hwnd)
+                info = winapi.get_window_info(hwnd)
+                active = _is_capture_surface(
+                    info.process, info.class_name, info.title,
+                    rect, virtual_rect)
+            except Exception:
+                pass
+            return not active
+
+        try:
+            win32gui.EnumWindows(callback, None)
+        except win32gui.error:
+            pass
+        return active
+
+    def _set_capture_active(self, active):
+        active = bool(active)
+        if active == self._capture_active:
+            return
+        self._capture_active = active
+        for hwnd in self._overlays.values():
+            if hwnd and win32gui.IsWindow(hwnd):
+                _set_capture_excluded(hwnd, active)
+        self._sync_taskbars()
+
+    def _taskbar_targets(self):
+        """Visible Windows taskbars on monitors currently selected for dimming."""
+        selected = {monitor["name"] for monitor in self._target_monitors()}
+        found = {}
+        for class_name in _TASKBAR_CLASSES:
+            after = 0
+            while True:
                 try:
-                    win32gui.PostMessage(
-                        overlay, _WM_REASSERT_TOPMOST, 0, 0)
+                    hwnd = win32gui.FindWindowEx(
+                        0, after, class_name, None)
+                except win32gui.error:
+                    break
+                if not hwnd:
+                    break
+                after = hwnd
+                try:
+                    monitor = win32api.MonitorFromWindow(
+                        hwnd, win32con.MONITOR_DEFAULTTONEAREST)
+                    info = win32api.GetMonitorInfo(monitor)
+                    name = info.get("Device", "")
+                    if name in selected:
+                        found[hwnd] = (name, win32gui.GetWindowRect(hwnd))
+                except Exception:
+                    pass
+        return found
+
+    def _new_taskbar_state(self, hwnd, monitor_name):
+        ex_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+        had_layered = bool(ex_style & win32con.WS_EX_LAYERED)
+        previous_alpha = winapi.get_window_alpha(hwnd)
+        # Do not overwrite a taskbar's own non-alpha layered composition.
+        if had_layered and previous_alpha is None:
+            return None
+        return {
+            "monitor": monitor_name,
+            "had_layered": had_layered,
+            "previous_alpha": previous_alpha,
+            "backdrop": None,
+            "applied": False,
+            "rect": None,
+        }
+
+    def _write_taskbar_ledger(self):
+        if not self._taskbar_ledger_path:
+            return
+        rows = []
+        for hwnd, state in self._taskbars.items():
+            if state.get("applied") and win32gui.IsWindow(hwnd):
+                rows.append({
+                    "hwnd": int(hwnd),
+                    "pid": winapi.get_window_pid(hwnd),
+                    "had_layered": bool(state["had_layered"]),
+                    "previous_alpha": state["previous_alpha"],
+                })
+        try:
+            if not rows:
+                os.remove(self._taskbar_ledger_path)
+                return
+            os.makedirs(os.path.dirname(self._taskbar_ledger_path), exist_ok=True)
+            temporary = self._taskbar_ledger_path + ".tmp"
+            with open(temporary, "w", encoding="utf-8") as handle:
+                json.dump(rows, handle)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self._taskbar_ledger_path)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
+
+    def _recover_taskbars(self):
+        if (not self._taskbar_ledger_path or
+                not os.path.exists(self._taskbar_ledger_path)):
+            return
+        try:
+            with open(self._taskbar_ledger_path, "r", encoding="utf-8") as handle:
+                rows = json.load(handle)
+            for row in rows if isinstance(rows, list) else []:
+                hwnd = int(row.get("hwnd", 0))
+                if (not win32gui.IsWindow(hwnd) or
+                        winapi.get_window_pid(hwnd) != int(row.get("pid", 0)) or
+                        win32gui.GetClassName(hwnd) not in _TASKBAR_CLASSES):
+                    continue
+                winapi.restore_window(
+                    hwnd, had_layered=bool(row.get("had_layered")),
+                    prev_alpha=row.get("previous_alpha"))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            pass
+        finally:
+            try:
+                os.remove(self._taskbar_ledger_path)
+            except OSError:
+                pass
+
+    def _create_taskbar_backdrop(self, hwnd, rect):
+        self._register_class()
+        left, top, right, bottom = rect
+        ex_style = (win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT |
+                    win32con.WS_EX_NOACTIVATE | win32con.WS_EX_TOOLWINDOW)
+        backdrop = win32gui.CreateWindowEx(
+            ex_style, _WINDOW_CLASS, "Taskbar Dimming Backdrop",
+            win32con.WS_POPUP, left, top, right - left, bottom - top,
+            0, 0, win32api.GetModuleHandle(None), None)
+        if backdrop:
+            ctypes.windll.user32.SetLayeredWindowAttributes(
+                backdrop, 0, 255, win32con.LWA_ALPHA)
+            _set_capture_excluded(backdrop, self._capture_active)
+        return backdrop
+
+    def _restore_taskbar(self, hwnd, state, destroy_backdrop=False):
+        if state.get("applied") and win32gui.IsWindow(hwnd):
+            winapi.restore_window(
+                hwnd, had_layered=state["had_layered"],
+                prev_alpha=state["previous_alpha"])
+            state["applied"] = False
+            self._write_taskbar_ledger()
+        backdrop = state.get("backdrop")
+        if backdrop and win32gui.IsWindow(backdrop):
+            if destroy_backdrop:
+                try:
+                    win32gui.DestroyWindow(backdrop)
                 except win32gui.error:
                     pass
+                state["backdrop"] = None
+            else:
+                win32gui.ShowWindow(backdrop, win32con.SW_HIDE)
+
+    def _sync_taskbars(self):
+        targets = self._taskbar_targets() if self.enabled else {}
+        for hwnd in list(self._taskbars):
+            if hwnd not in targets or not win32gui.IsWindow(hwnd):
+                state = self._taskbars.pop(hwnd)
+                self._restore_taskbar(hwnd, state, destroy_backdrop=True)
+
+        for hwnd, (monitor_name, rect) in targets.items():
+            state = self._taskbars.get(hwnd)
+            if state is None:
+                state = self._new_taskbar_state(hwnd, monitor_name)
+                if state is None:
+                    continue
+                self._taskbars[hwnd] = state
+            state["monitor"] = monitor_name
+
+            intensity = self._alpha(monitor_name)
+            if self._capture_active or intensity <= 0:
+                self._restore_taskbar(hwnd, state)
+                continue
+
+            backdrop = state.get("backdrop")
+            if backdrop is None or not win32gui.IsWindow(backdrop):
+                backdrop = self._create_taskbar_backdrop(hwnd, rect)
+                state["backdrop"] = backdrop
+            if not backdrop:
+                continue
+
+            left, top, right, bottom = rect
+            _set_capture_excluded(backdrop, False)
+            win32gui.SetWindowPos(
+                backdrop, hwnd, left, top, right - left, bottom - top,
+                win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE)
+            if not winapi.set_window_alpha(hwnd, 255 - intensity):
+                win32gui.ShowWindow(backdrop, win32con.SW_HIDE)
+                continue
+            state["applied"] = True
+            state["rect"] = rect
+            self._write_taskbar_ledger()
+
+    def _destroy_taskbars(self):
+        for hwnd, state in list(self._taskbars.items()):
+            self._restore_taskbar(hwnd, state, destroy_backdrop=True)
+        self._taskbars.clear()
 
     def _destroy_one(self, name):
         hwnd = self._overlays.pop(name, None)
+        _overlay_owners.pop(hwnd, None)
         if hwnd and win32gui.IsWindow(hwnd):
             try:
                 win32gui.DestroyWindow(hwnd)
@@ -297,16 +545,21 @@ class ScreenDimmer:
                 self._overlays[name] = self._create(name, rect)
             else:
                 self._reassert(name, hwnd, rect)
+        self._sync_taskbars()
 
     def set_enabled(self, enabled: bool):
         self.enabled = bool(enabled)
         if self.enabled:
+            self._capture_active = self._capture_ui_active()
             self._rebuild()
             self._z_order_hook.start()
         else:
             self._z_order_hook.stop()
+            self._capture_active = False
+            self._destroy_taskbars()
             for hwnd in self._overlays.values():
                 if hwnd and win32gui.IsWindow(hwnd):
+                    _set_capture_excluded(hwnd, False)
                     win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
 
     def set_intensity(self, value: int):
@@ -317,6 +570,7 @@ class ScreenDimmer:
                 if hwnd and win32gui.IsWindow(hwnd):
                     ctypes.windll.user32.SetLayeredWindowAttributes(
                         hwnd, 0, self._alpha(name), win32con.LWA_ALPHA)
+            self._sync_taskbars()
 
     def tick(self):
         """Call periodically (e.g. every 2 s from the UI) while enabled to keep
@@ -324,10 +578,13 @@ class ScreenDimmer:
         monitors being plugged in or removed."""
         if not self.enabled:
             return
+        self._set_capture_active(self._capture_ui_active())
         self._rebuild()
 
     def destroy(self):
         self._z_order_hook.stop()
+        self._capture_active = False
+        self._destroy_taskbars()
         for name in list(self._overlays):
             self._destroy_one(name)
         self._overlays.clear()

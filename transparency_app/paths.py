@@ -29,6 +29,10 @@ def ledger_path() -> str:
     return os.path.join(app_data_dir(), "session.json")
 
 
+def taskbar_ledger_path() -> str:
+    return os.path.join(app_data_dir(), "taskbar-session.json")
+
+
 def log_path() -> str:
     return os.path.join(app_data_dir(), "app.log")
 

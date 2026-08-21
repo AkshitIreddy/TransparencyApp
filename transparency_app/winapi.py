@@ -70,6 +70,8 @@ EVENT_SYSTEM_FOREGROUND = 0x0003
 EVENT_OBJECT_CREATE = 0x8000
 EVENT_OBJECT_DESTROY = 0x8001
 EVENT_OBJECT_SHOW = 0x8002
+EVENT_OBJECT_REORDER = 0x8004
+EVENT_OBJECT_LOCATIONCHANGE = 0x800B
 EVENT_OBJECT_NAMECHANGE = 0x800C
 EVENT_OBJECT_UNCLOAKED = 0x8018
 WINEVENT_OUTOFCONTEXT = 0x0000
@@ -389,8 +391,9 @@ class WinEventHook:
         EVENT_OBJECT_UNCLOAKED,
     )
 
-    def __init__(self, callback, skip_own_process=True):
+    def __init__(self, callback, skip_own_process=True, events=None):
         self._callback = callback
+        self._events = tuple(events) if events is not None else self._EVENTS
         self._flags = WINEVENT_OUTOFCONTEXT
         if skip_own_process:
             self._flags |= WINEVENT_SKIPOWNPROCESS
@@ -418,7 +421,7 @@ class WinEventHook:
         # ctypes callback — a native crash on the next event.
         user32.PeekMessageW(ctypes.byref(msg), None,
                             win32con.WM_USER, win32con.WM_USER, 0)
-        for ev in self._EVENTS:
+        for ev in self._events:
             hook = user32.SetWinEventHook(
                 ev, ev, None, self._proc, 0, 0, self._flags,
             )
