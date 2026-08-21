@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [semantic versioning](https://semver.org/).
 
+## [2.2.4] — 2026-08-21
+
+### Fixed
+- **Restored the proven v2.2.0 dimmer behavior** — removed all direct Start,
+  taskbar, and Explorer transparency changes. The app never alters taskbar
+  opacity.
+- **Snipping isolation is now strictly temporary** — dimmer windows use normal
+  display behavior at all other times and enable capture exclusion only while
+  Windows' transient snipping surface is visible, then immediately turn it off.
+
 ## [2.2.3] — 2026-08-21
 
 ### Fixed

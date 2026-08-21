@@ -54,8 +54,8 @@ display has its own dimming slider, so one screen can stay bright while another
 is heavily dimmed. Untick a display to leave it completely unchanged. While
 Windows Snipping Tool is selecting a capture, the app temporarily excludes its
 dimmer so the saved screenshot retains the original brightness. Start,
-auto-hidden taskbars, and Windows shell flyouts remain visually dimmed during
-normal use.
+taskbars, and Windows shell flyouts retain the original v2.2.0 dimmer behavior
+during normal use; the app never changes Explorer or taskbar transparency.
 
 ## Updates
 

@@ -36,7 +36,8 @@ tray.
 - 🌒 **Per-monitor screen dimmer** — set a different click-through dimming
   level for every display, or leave selected screens unchanged. The overlay is
   automatically left out while Windows Snipping Tool captures, while still
-  covering Start, auto-hidden taskbars, and Windows shell flyouts.
+  using the original v2.2.0 dimmer behavior at every other time. It never
+  changes Explorer or taskbar transparency.
 - ⌨️ **Global hotkeys** — toggle transparency/focus, nudge opacity, or restore
   everything with one keystroke. Every shortcut is remappable in Settings.
 - 🖱️ **Per-rule click-through & always-on-top.**
