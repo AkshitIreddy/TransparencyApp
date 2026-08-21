@@ -39,7 +39,22 @@ _SetWindowDisplayAffinity.argtypes = [wintypes.HWND, wintypes.DWORD]
 _SetWindowDisplayAffinity.restype = wintypes.BOOL
 
 _WINDOW_CLASS = "TransparencyAppDimmer"
+_WM_REASSERT_TOPMOST = win32con.WM_APP + 1
 _class_registered = False
+
+
+def _overlay_wnd_proc(hwnd, message, wparam, lparam):
+    """Keep shell surfaces opened later from overtaking a dimmer overlay."""
+    if message == _WM_REASSERT_TOPMOST:
+        try:
+            win32gui.SetWindowPos(
+                hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
+                win32con.SWP_NOMOVE | win32con.SWP_NOSIZE |
+                win32con.SWP_NOACTIVATE | win32con.SWP_NOOWNERZORDER)
+        except win32gui.error:
+            pass
+        return 0
+    return win32gui.DefWindowProc(hwnd, message, wparam, lparam)
 
 
 class _APPBARDATA(ctypes.Structure):
@@ -109,6 +124,7 @@ class ScreenDimmer:
         self._intensities = {}  # monitor device name -> 0..MAX_DIM_ALPHA
         self.enabled = False
         self._monitors = "all"  # "all", or a list of monitor device names
+        self._z_order_hook = winapi.WinEventHook(self._on_shell_event)
 
     @property
     def intensity(self) -> int:
@@ -164,7 +180,7 @@ class ScreenDimmer:
         if _class_registered:
             return
         wc = win32gui.WNDCLASS()
-        wc.lpfnWndProc = lambda h, m, w, l: win32gui.DefWindowProc(h, m, w, l)
+        wc.lpfnWndProc = _overlay_wnd_proc
         wc.lpszClassName = _WINDOW_CLASS
         wc.hInstance = win32api.GetModuleHandle(None)
         wc.hbrBackground = win32gui.GetStockObject(win32con.BLACK_BRUSH)
@@ -242,6 +258,24 @@ class ScreenDimmer:
         ctypes.windll.user32.SetLayeredWindowAttributes(
             hwnd, 0, self._alpha(monitor_name), win32con.LWA_ALPHA)
 
+    def _on_shell_event(self, _event, _hwnd):
+        """Request a UI-thread z-order refresh after another window surfaces.
+
+        Start, taskbar flyouts and other topmost shell windows can be created
+        after the monitor overlays. Posting to the owned overlay windows keeps
+        the native hook callback non-blocking and lets their UI thread restore
+        the intended ordering immediately.
+        """
+        if not self.enabled:
+            return
+        for overlay in tuple(self._overlays.values()):
+            if overlay:
+                try:
+                    win32gui.PostMessage(
+                        overlay, _WM_REASSERT_TOPMOST, 0, 0)
+                except win32gui.error:
+                    pass
+
     def _destroy_one(self, name):
         hwnd = self._overlays.pop(name, None)
         if hwnd and win32gui.IsWindow(hwnd):
@@ -268,7 +302,9 @@ class ScreenDimmer:
         self.enabled = bool(enabled)
         if self.enabled:
             self._rebuild()
+            self._z_order_hook.start()
         else:
+            self._z_order_hook.stop()
             for hwnd in self._overlays.values():
                 if hwnd and win32gui.IsWindow(hwnd):
                     win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
@@ -291,6 +327,7 @@ class ScreenDimmer:
         self._rebuild()
 
     def destroy(self):
+        self._z_order_hook.stop()
         for name in list(self._overlays):
             self._destroy_one(name)
         self._overlays.clear()

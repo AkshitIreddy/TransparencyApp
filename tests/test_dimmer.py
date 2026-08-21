@@ -1,7 +1,9 @@
 import ctypes
 import ctypes.wintypes as wintypes
+import time
 
 import pytest
+import win32con
 import win32gui
 
 from transparency_app import dimmer as dimmer_module
@@ -57,3 +59,36 @@ def test_overlay_is_excluded_from_screen_capture_on_supported_windows():
     finally:
         if hwnd and win32gui.IsWindow(hwnd):
             win32gui.DestroyWindow(hwnd)
+
+
+def _z_order_index(hwnd):
+    windows = []
+    win32gui.EnumWindows(lambda candidate, _: windows.append(candidate) or True,
+                         None)
+    return windows.index(hwnd)
+
+
+def test_shell_event_reasserts_overlay_above_new_topmost_surface(make_window):
+    dimmer = ScreenDimmer()
+    overlay = dimmer._create("TEST_DISPLAY", (-32000, -32000, 64, 64))
+    dimmer._overlays["TEST_DISPLAY"] = overlay
+    dimmer.enabled = True
+    shell_surface = make_window()
+    win32gui.SetWindowPos(
+        shell_surface.hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
+        0x0001 | 0x0002 | 0x0010)  # SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE
+    try:
+        assert _z_order_index(shell_surface.hwnd) < _z_order_index(overlay)
+
+        dimmer._on_shell_event(
+            dimmer_module.winapi.EVENT_OBJECT_SHOW, shell_surface.hwnd)
+        deadline = time.time() + 1
+        while time.time() < deadline:
+            win32gui.PumpWaitingMessages()
+            if _z_order_index(overlay) < _z_order_index(shell_surface.hwnd):
+                break
+            time.sleep(0.01)
+
+        assert _z_order_index(overlay) < _z_order_index(shell_surface.hwnd)
+    finally:
+        dimmer.destroy()
