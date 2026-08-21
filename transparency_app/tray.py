@@ -31,7 +31,7 @@ class Tray:
     def _menu(self):
         paused = self.controller.engine.paused
         focus = self.controller.engine.focus_mode
-        return pystray.Menu(
+        items = [
             pystray.MenuItem("Show window", lambda: self.controller.show_window(),
                              default=True),
             pystray.Menu.SEPARATOR,
@@ -43,9 +43,19 @@ class Tray:
                 checked=lambda _i: focus),
             pystray.MenuItem("Restore all windows",
                              lambda: self.controller.restore_all()),
+        ]
+        if self.controller.update_state == "ready":
+            items.extend([
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem(
+                    "Install downloaded update",
+                    lambda: self.controller.request_install_update()),
+            ])
+        items.extend([
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Quit", lambda: self.controller.quit()),
-        )
+        ])
+        return pystray.Menu(*items)
 
     def start(self):
         self._icon = pystray.Icon(
@@ -61,6 +71,19 @@ class Tray:
                 self._icon.update_menu()
             except Exception:
                 pass
+
+    def notify_update(self, version):
+        """Show a native desktop notification for a verified update."""
+        if self._icon is None or not self._icon.HAS_NOTIFICATION:
+            return False
+        try:
+            self._icon.notify(
+                f"Version {version} is downloaded and verified. "
+                "Open Transparency App or use its tray menu to install it.",
+                "Transparency App update ready")
+            return True
+        except Exception:
+            return False
 
     def stop(self):
         if self._icon is not None:

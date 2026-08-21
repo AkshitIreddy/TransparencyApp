@@ -355,6 +355,8 @@ class AppController:
         self.update_message = message
         if self.window:
             self._ui(lambda: self.window.set_update_state(state, message))
+        if self.tray:
+            self.tray.refresh()
 
     def check_for_updates(self, manual=False):
         if not self._update_lock.acquire(blocking=False):
@@ -382,7 +384,9 @@ class AppController:
                     release, destination, progress=progress)
                 self._set_update_state(
                     "ready", f"v{release.version} is ready to install.")
-                if self.window:
+                if self.tray:
+                    self.tray.notify_update(release.version)
+                if manual and self.window:
                     self._ui(lambda: self.window.offer_update(release.version))
             except updater.UpdateError as exc:
                 log.warning("update check failed: %s", exc)
@@ -411,6 +415,10 @@ class AppController:
         self._set_update_state("installing", "Restarting to finish the update…")
         if self.window:
             self.window.after(150, self._quit_impl)
+
+    def request_install_update(self):
+        """Marshal a tray-menu install request onto Tk's UI thread."""
+        self._ui(self.install_ready_update)
 
     def quit(self):
         self._ui(self._quit_impl)
