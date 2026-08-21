@@ -41,7 +41,7 @@ class AppController:
 
         self.config = ConfigManager(paths.config_path())
         self.engine = TransparencyEngine(self.config, ledger_path=paths.ledger_path())
-        self.dimmer = ScreenDimmer(taskbar_ledger_path=paths.taskbar_ledger_path())
+        self.dimmer = ScreenDimmer()
         self.dimmer.set_intensity(self.config.get_setting("dimmer_intensity", 160))
         self.dimmer.set_intensities(
             self.config.get_setting("dimmer_intensities", {}))
