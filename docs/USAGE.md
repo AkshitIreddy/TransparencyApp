@@ -51,7 +51,9 @@ remembered across launches, like the screen dimmer.
 The **Screen dimmer** lays a soft dark overlay over your monitors to cut glare
 in a dark room. It is click-through, so it never gets in your way. Each detected
 display has its own dimming slider, so one screen can stay bright while another
-is heavily dimmed. Untick a display to leave it completely unchanged.
+is heavily dimmed. Untick a display to leave it completely unchanged. Snipping
+Tool and compatible Windows capture apps leave the dimmer out, so screenshots
+retain the screen's original, undimmed brightness.
 
 ## Updates
 

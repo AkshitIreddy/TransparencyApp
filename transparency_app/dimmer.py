@@ -11,6 +11,7 @@ thread's messages, which keeps the overlay windows responsive.
 
 import ctypes
 import ctypes.wintypes as wintypes
+import sys
 
 import win32api
 import win32con
@@ -25,6 +26,17 @@ ABE_LEFT, ABE_TOP, ABE_RIGHT, ABE_BOTTOM = 0, 1, 2, 3
 
 MAX_DIM_ALPHA = 200  # never allow a full blackout
 _TASKBAR_GAP_PX = 2
+
+# Windows 10 version 2004 introduced a capture affinity that removes a window
+# from screenshots while leaving it visible on the physical display. On older
+# Windows builds the same value degrades to WDA_MONITOR, which would replace the
+# overlay with a black rectangle in captures, so do not apply it there.
+WDA_EXCLUDEFROMCAPTURE = 0x00000011
+_CAPTURE_EXCLUSION_MIN_BUILD = 19041
+
+_SetWindowDisplayAffinity = ctypes.windll.user32.SetWindowDisplayAffinity
+_SetWindowDisplayAffinity.argtypes = [wintypes.HWND, wintypes.DWORD]
+_SetWindowDisplayAffinity.restype = wintypes.BOOL
 
 _WINDOW_CLASS = "TransparencyAppDimmer"
 _class_registered = False
@@ -64,6 +76,30 @@ def _rect_contains(rect, point):
     x, y, w, h = rect
     px, py = point
     return x <= px < x + w and y <= py < y + h
+
+
+def _capture_exclusion_supported():
+    """Whether WDA_EXCLUDEFROMCAPTURE has its transparent capture behavior."""
+    try:
+        version = sys.getwindowsversion()
+        return (version.major > 10 or
+                (version.major == 10 and
+                 version.build >= _CAPTURE_EXCLUSION_MIN_BUILD))
+    except (AttributeError, OSError):
+        return False
+
+
+def _exclude_from_capture(hwnd):
+    """Keep an owned top-level window visible locally but out of captures."""
+    if not hwnd or not _capture_exclusion_supported():
+        return False
+    try:
+        return bool(_SetWindowDisplayAffinity(
+            wintypes.HWND(hwnd), WDA_EXCLUDEFROMCAPTURE))
+    except (AttributeError, OSError, ValueError):
+        # Dimming is still useful if display affinity is unavailable. Avoid
+        # failing overlay creation on unusual or unsupported Windows setups.
+        return False
 
 
 class ScreenDimmer:
@@ -192,6 +228,7 @@ class ScreenDimmer:
             return None
         ctypes.windll.user32.SetLayeredWindowAttributes(
             hwnd, 0, self._alpha(monitor_name), win32con.LWA_ALPHA)
+        _exclude_from_capture(hwnd)
         win32gui.SetWindowPos(
             hwnd, win32con.HWND_TOPMOST, x, y, width, height,
             win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE)

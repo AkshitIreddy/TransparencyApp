@@ -34,7 +34,8 @@ tray.
 - 🫥 **Focus mode** — dim every window except the one you're using; it follows
   your focus automatically.
 - 🌒 **Per-monitor screen dimmer** — set a different click-through dimming
-  level for every display, or leave selected screens unchanged.
+  level for every display, or leave selected screens unchanged. The overlay is
+  automatically left out of Snipping Tool screenshots and screen captures.
 - ⌨️ **Global hotkeys** — toggle transparency/focus, nudge opacity, or restore
   everything with one keystroke. Every shortcut is remappable in Settings.
 - 🖱️ **Per-rule click-through & always-on-top.**

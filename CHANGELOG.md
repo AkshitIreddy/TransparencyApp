@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [semantic versioning](https://semver.org/).
 
+## [2.2.1] — 2026-08-21
+
+### Fixed
+- **Undimmed screenshots** — Snipping Tool and other Windows capture APIs now
+  omit the screen-dimming overlays, so saved screenshots keep their original
+  brightness while the physical displays stay comfortably dimmed.
+
 ## [2.2.0] — 2026-08-09
 
 ### Added
