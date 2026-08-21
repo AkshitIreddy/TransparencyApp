@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [semantic versioning](https://semver.org/).
 
+## [2.2.3] — 2026-08-21
+
+### Fixed
+- **Start and taskbar dimming regression** — capture exclusion is now enabled
+  only while the transient Windows snipping surface is active. This restores
+  normal dimming over Start without making Snipping Tool captures dark.
+- **Auto-hidden taskbar coverage** — each selected monitor's taskbar is dimmed
+  over a reversible black backdrop, including secondary displays. Original
+  Explorer styles are restored on shutdown and from a crash-recovery ledger.
+
 ## [2.2.2] — 2026-08-21
 
 ### Added

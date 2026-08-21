@@ -35,8 +35,8 @@ tray.
   your focus automatically.
 - 🌒 **Per-monitor screen dimmer** — set a different click-through dimming
   level for every display, or leave selected screens unchanged. The overlay is
-  automatically left out of Snipping Tool screenshots and screen captures,
-  while still covering Start, the taskbar, and Windows shell flyouts.
+  automatically left out while Windows Snipping Tool captures, while still
+  covering Start, auto-hidden taskbars, and Windows shell flyouts.
 - ⌨️ **Global hotkeys** — toggle transparency/focus, nudge opacity, or restore
   everything with one keystroke. Every shortcut is remappable in Settings.
 - 🖱️ **Per-rule click-through & always-on-top.**
