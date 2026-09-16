@@ -18,6 +18,7 @@ import win32con
 import win32gui
 
 from . import winapi
+from .output_dimmer import GammaDimmer
 
 ABM_GETSTATE = 0x00000004
 ABM_GETTASKBARPOS = 0x00000005
@@ -130,7 +131,7 @@ def _is_capture_surface(process, class_name, title, rect, virtual_rect):
 
 
 class ScreenDimmer:
-    def __init__(self):
+    def __init__(self, output_ledger_path=None):
         self._overlays = {}     # monitor device name -> overlay hwnd
         self._intensity = 160   # fallback for newly connected monitors
         self._intensities = {}  # monitor device name -> 0..MAX_DIM_ALPHA
@@ -138,6 +139,8 @@ class ScreenDimmer:
         self._monitors = "all"  # "all", or a list of monitor device names
         self._capture_active = False
         self._capture_hook = winapi.WinEventHook(self._on_window_event)
+        self._output = GammaDimmer(output_ledger_path)
+        self._overlay_alphas = {}
 
     @property
     def intensity(self) -> int:
@@ -172,10 +175,8 @@ class ScreenDimmer:
         if not name:
             return
         self._intensities[name] = max(0, min(MAX_DIM_ALPHA, int(value)))
-        hwnd = self._overlays.get(name)
-        if self.enabled and hwnd and win32gui.IsWindow(hwnd):
-            ctypes.windll.user32.SetLayeredWindowAttributes(
-                hwnd, 0, self._alpha(name), win32con.LWA_ALPHA)
+        if self.enabled:
+            self._rebuild()
 
     def set_monitors(self, value):
         """Choose coverage: "all", or a list of monitor device names."""
@@ -243,6 +244,9 @@ class ScreenDimmer:
                  if monitor_name is not None else self._intensity)
         return max(0, min(MAX_DIM_ALPHA, value))
 
+    def _overlay_alpha(self, monitor_name):
+        return self._overlay_alphas.get(str(monitor_name), self._alpha(monitor_name))
+
     def _create(self, monitor_name, rect):
         self._register_class()
         x, y, width, height = rect
@@ -256,7 +260,7 @@ class ScreenDimmer:
         if not hwnd:
             return None
         ctypes.windll.user32.SetLayeredWindowAttributes(
-            hwnd, 0, self._alpha(monitor_name), win32con.LWA_ALPHA)
+            hwnd, 0, self._overlay_alpha(monitor_name), win32con.LWA_ALPHA)
         _set_capture_excluded(hwnd, self._capture_active)
         win32gui.SetWindowPos(
             hwnd, win32con.HWND_TOPMOST, x, y, width, height,
@@ -270,7 +274,7 @@ class ScreenDimmer:
             hwnd, win32con.HWND_TOPMOST, x, y, width, height,
             win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE)
         ctypes.windll.user32.SetLayeredWindowAttributes(
-            hwnd, 0, self._alpha(monitor_name), win32con.LWA_ALPHA)
+            hwnd, 0, self._overlay_alpha(monitor_name), win32con.LWA_ALPHA)
         _set_capture_excluded(hwnd, self._capture_active)
 
     def _on_window_event(self, _event, _hwnd):
@@ -333,11 +337,32 @@ class ScreenDimmer:
     def _rebuild(self):
         """Make the live overlays match the current target monitors, creating,
         moving and destroying windows as displays or the selection change."""
-        rects = self._overlay_rects(self._target_monitors())
+        monitors = self._target_monitors()
+        rects = self._overlay_rects(monitors)
+        output_names = set()
+        overlay_alphas = {}
+        for monitor in monitors:
+            name = monitor["name"]
+            requested = self._alpha(name)
+            applied = self._output.apply(name, requested)
+            if applied is not None:
+                output_names.add(name)
+                requested_scale = (255 - requested) / 255
+                output_scale = (255 - applied) / 255
+                residual_scale = requested_scale / output_scale
+                overlay_alphas[name] = max(
+                    0, min(MAX_DIM_ALPHA, round(255 * (1 - residual_scale))))
+            else:
+                overlay_alphas[name] = requested
+        self._overlay_alphas = overlay_alphas
+        self._output.restore_except(output_names)
         for name in list(self._overlays):
-            if name not in rects:
+            if (name not in rects or
+                    (name in output_names and overlay_alphas.get(name, 0) <= 0)):
                 self._destroy_one(name)
         for name, rect in rects.items():
+            if name in output_names and overlay_alphas.get(name, 0) <= 0:
+                continue
             hwnd = self._overlays.get(name)
             if hwnd is None or not win32gui.IsWindow(hwnd):
                 self._overlays[name] = self._create(name, rect)
@@ -353,6 +378,8 @@ class ScreenDimmer:
         else:
             self._capture_hook.stop()
             self._capture_active = False
+            self._output.restore_all()
+            self._overlay_alphas.clear()
             for hwnd in self._overlays.values():
                 if hwnd and win32gui.IsWindow(hwnd):
                     _set_capture_excluded(hwnd, False)
@@ -362,10 +389,7 @@ class ScreenDimmer:
         """Set the fallback used for monitors without a saved level."""
         self._intensity = max(0, min(MAX_DIM_ALPHA, int(value)))
         if self.enabled:
-            for name, hwnd in self._overlays.items():
-                if hwnd and win32gui.IsWindow(hwnd):
-                    ctypes.windll.user32.SetLayeredWindowAttributes(
-                        hwnd, 0, self._alpha(name), win32con.LWA_ALPHA)
+            self._rebuild()
 
     def tick(self):
         """Call periodically (e.g. every 2 s from the UI) while enabled to keep
@@ -379,6 +403,8 @@ class ScreenDimmer:
     def destroy(self):
         self._capture_hook.stop()
         self._capture_active = False
+        self._output.restore_all()
+        self._overlay_alphas.clear()
         for name in list(self._overlays):
             self._destroy_one(name)
         self._overlays.clear()

@@ -79,3 +79,40 @@ def test_only_transient_capture_surfaces_enable_capture_affinity(
         process, class_name, title, rect, active):
     assert dimmer_module._is_capture_surface(
         process, class_name, title, rect, (0, 0, 1920, 1080)) is active
+
+
+def test_verified_output_backend_replaces_overlay(monkeypatch):
+    dimmer = ScreenDimmer()
+    monitor = {
+        "name": "DISPLAY1", "rect": (-32000, -32000, 64, 64),
+        "primary": True, "number": 1, "label": "Display 1"}
+    monkeypatch.setattr(dimmer, "_target_monitors", lambda: [monitor])
+    monkeypatch.setattr(dimmer._output, "apply", lambda name, value: value)
+    restored = []
+    monkeypatch.setattr(
+        dimmer._output, "restore_except",
+        lambda names: restored.append(set(names)))
+    dimmer.enabled = True
+
+    dimmer._rebuild()
+
+    assert dimmer._overlays == {}
+    assert restored == [{"DISPLAY1"}]
+
+
+def test_gamma_cap_uses_overlay_only_for_remaining_dimming(monkeypatch):
+    dimmer = ScreenDimmer()
+    dimmer.set_monitor_intensity("DISPLAY1", 200)
+    monitor = {
+        "name": "DISPLAY1", "rect": (-32000, -32000, 64, 64),
+        "primary": True, "number": 1, "label": "Display 1"}
+    monkeypatch.setattr(dimmer, "_target_monitors", lambda: [monitor])
+    monkeypatch.setattr(dimmer._output, "apply", lambda _name, _value: 127)
+    monkeypatch.setattr(dimmer._output, "restore_except", lambda _names: None)
+    dimmer.enabled = True
+    try:
+        dimmer._rebuild()
+        assert dimmer._overlay_alpha("DISPLAY1") == 145
+        assert dimmer._overlays["DISPLAY1"]
+    finally:
+        dimmer.destroy()
