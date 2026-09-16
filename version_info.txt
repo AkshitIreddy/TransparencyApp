@@ -1,0 +1,36 @@
+# UTF-8
+# PyInstaller Windows version resource: gives TransparencyApp.exe its
+# app-specific identity in Explorer properties, Task Manager and the
+# UAC/picker dialogs (product name, description, version, icon pairing).
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(2, 3, 0, 0),
+    prodvers=(2, 3, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0),
+  ),
+  kids=[
+    StringFileInfo(
+      [
+        StringTable(
+          '040904B0',
+          [
+            StringStruct('CompanyName', 'Transparency App'),
+            StringStruct('FileDescription', 'Transparency App - per-window transparency and screen dimming'),
+            StringStruct('FileVersion', '2.3.0'),
+            StringStruct('InternalName', 'TransparencyApp'),
+            StringStruct('LegalCopyright', 'Transparency App'),
+            StringStruct('OriginalFilename', 'TransparencyApp.exe'),
+            StringStruct('ProductName', 'Transparency App'),
+            StringStruct('ProductVersion', '2.3.0'),
+          ],
+        ),
+      ],
+    ),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])]),
+  ],
+)

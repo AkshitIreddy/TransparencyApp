@@ -2,7 +2,7 @@
 Settings pages. Talks to the controller for anything that touches the OS."""
 
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 
 import customtkinter as ctk
 
@@ -651,11 +651,59 @@ class AppWindow(ctk.CTk):
     def offer_update(self, version):
         self.deiconify()
         self.lift()
-        if messagebox.askyesno(
-                "Transparency App update",
-                f"Version {version} has been downloaded and verified.\n\n"
-                "Install it and restart Transparency App now?",
-                parent=self):
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Transparency App update")
+        dialog.geometry("460x280")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+        try:
+            dialog.iconbitmap(self.controller.icon_path)
+        except Exception:
+            pass
+        dialog.configure(fg_color=theme.BG)
+        shell = ctk.CTkFrame(
+            dialog, fg_color=theme.SURFACE, corner_radius=theme.RADIUS,
+            border_width=1, border_color=theme.BORDER)
+        shell.pack(fill="both", expand=True, padx=18, pady=18)
+        brand = ctk.CTkFrame(shell, fg_color="transparent")
+        brand.pack(fill="x", padx=20, pady=(20, 8))
+        ctk.CTkLabel(
+            brand, text="◐", width=40, font=theme.font(30, "bold"),
+            text_color=theme.ACCENT).pack(side="left")
+        titles = ctk.CTkFrame(brand, fg_color="transparent")
+        titles.pack(side="left", padx=(10, 0))
+        ctk.CTkLabel(
+            titles, text=f"Version {version} is ready",
+            font=theme.h2(), text_color=theme.TEXT).pack(anchor="w")
+        ctk.CTkLabel(
+            titles, text="Downloaded and SHA-256 verified",
+            font=theme.small(), text_color=theme.TEXT_MUTED).pack(anchor="w")
+        ctk.CTkLabel(
+            shell, wraplength=380, justify="left", font=theme.body(),
+            text_color=theme.TEXT_MUTED,
+            text="Install it and restart Transparency App now? "
+                 "Your settings are kept and you can roll back if needed."
+        ).pack(anchor="w", padx=20, pady=(6, 14))
+        buttons = ctk.CTkFrame(shell, fg_color="transparent")
+        buttons.pack(fill="x", padx=20, pady=(0, 6))
+        result = {"install": False}
+
+        def _later():
+            result["install"] = True
+            dialog.destroy()
+
+        ctk.CTkButton(
+            buttons, text="Later", width=110, height=34,
+            fg_color=theme.SURFACE_2, hover_color=theme.BORDER,
+            text_color=theme.TEXT, command=dialog.destroy).pack(side="left")
+        ctk.CTkButton(
+            buttons, text="Install & restart", width=160, height=34,
+            fg_color=theme.ACCENT, hover_color=theme.ACCENT_HOVER,
+            command=_later).pack(side="right")
+        dialog.focus_force()
+        self.wait_window(dialog)
+        if result["install"]:
             self.controller.install_ready_update()
 
     def _export(self):

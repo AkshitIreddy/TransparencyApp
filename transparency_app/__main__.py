@@ -13,6 +13,9 @@ from .app import AppController
 
 
 def main():
+    if "--install-update" in sys.argv:
+        from .update_installer import run as run_update_installer
+        sys.exit(run_update_installer(sys.argv[1:]))
     if "--self-test" in sys.argv:
         # A windowed (no-console) exe has no usable stderr/stdout: faulthandler
         # needs a real file descriptor and print would die. Skip them so the

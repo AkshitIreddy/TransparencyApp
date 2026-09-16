@@ -104,19 +104,29 @@ def test_download_update_removes_partial_on_hash_mismatch(tmp_path):
 def test_installer_refuses_unexpected_target_name(tmp_path):
     staged = tmp_path / "staged.exe"
     staged.write_bytes(b"bytes")
+    digest = hashlib.sha256(b"bytes").hexdigest()
     with pytest.raises(updater.UpdateError, match="unexpected executable"):
-        updater.launch_installer(str(staged), str(tmp_path / "other.exe"))
+        updater.launch_installer(
+            str(staged), str(tmp_path / "other.exe"), digest)
 
 
-def test_installer_writes_detached_rollback_helper(tmp_path, monkeypatch):
+def test_installer_rejects_hash_mismatch(tmp_path):
     staged = tmp_path / "staged.exe"
     staged.write_bytes(b"verified bytes")
     target = tmp_path / updater.ASSET_NAME
     target.write_bytes(b"old bytes")
+    with pytest.raises(updater.UpdateError, match="SHA-256"):
+        updater.launch_installer(str(staged), str(target), "0" * 64)
+
+
+def test_installer_launches_branded_update_mode(tmp_path, monkeypatch):
+    staged = tmp_path / "staged.exe"
+    staged.write_bytes(b"verified bytes")
+    digest = hashlib.sha256(b"verified bytes").hexdigest()
+    target = tmp_path / updater.ASSET_NAME
+    target.write_bytes(b"old bytes")
     called = {}
     sentinel = object()
-
-    monkeypatch.setattr(updater.tempfile, "gettempdir", lambda: str(tmp_path))
 
     def fake_popen(args, **kwargs):
         called["args"] = args
@@ -125,14 +135,12 @@ def test_installer_writes_detached_rollback_helper(tmp_path, monkeypatch):
 
     monkeypatch.setattr(updater.subprocess, "Popen", fake_popen)
     result = updater.launch_installer(
-        str(staged), str(target), process_id=12345)
+        str(staged), str(target), digest, process_id=12345)
 
     assert result is sentinel
-    assert "-WindowStyle" in called["args"]
-    assert "Hidden" in called["args"]
-    assert called["args"][called["args"].index("-AppProcessId") + 1] == "12345"
-    script_path = called["args"][called["args"].index("-File") + 1]
-    script = open(script_path, encoding="utf-8-sig").read()
-    assert "Wait-Process" in script
-    assert "$Target.previous" in script
-    assert "$swapped" in script
+    args = called["args"]
+    assert args[0] == str(staged)
+    assert "--install-update" in args
+    assert args[args.index("--target") + 1] == str(target)
+    assert args[args.index("--wait-pid") + 1] == "12345"
+    assert args[args.index("--expected-sha256") + 1] == digest

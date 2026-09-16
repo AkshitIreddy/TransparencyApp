@@ -15,6 +15,7 @@ import tempfile
 import urllib.request
 
 from . import __version__
+from .update_installer import file_sha256
 
 LATEST_RELEASE_API = (
     "https://api.github.com/repos/AkshitIreddy/TransparencyApp/releases/latest"
@@ -149,79 +150,33 @@ def staged_update_path(version):
     return os.path.join(directory, f"TransparencyApp-v{version}.exe")
 
 
-def launch_installer(staged_path, target_path, process_id=None):
-    """Start a detached replacement helper and return immediately."""
+def launch_installer(staged_path, target_path, expected_sha256, process_id=None,
+                     version=None):
+    """Start the verified executable's branded installer mode."""
     staged_path = os.path.abspath(staged_path)
     target_path = os.path.abspath(target_path)
     if not os.path.isfile(staged_path):
         raise UpdateError("The verified update file is missing.")
     if os.path.basename(target_path).lower() != ASSET_NAME.lower():
         raise UpdateError("Refusing to replace an unexpected executable name.")
-
-    script = os.path.join(
-        tempfile.gettempdir(), f"TransparencyApp-update-{os.getpid()}.ps1")
-    script_body = r'''param(
-    [int]$AppProcessId,
-    [string]$Source,
-    [string]$Target
-)
-$ErrorActionPreference = "Stop"
-$backup = "$Target.previous"
-try {
-    Wait-Process -Id $AppProcessId -Timeout 120 -ErrorAction SilentlyContinue
-    $deadline = [DateTime]::UtcNow.AddSeconds(60)
-    while ([DateTime]::UtcNow -lt $deadline) {
-        $swapped = $false
-        try {
-            if (Test-Path -LiteralPath $backup) {
-                Remove-Item -LiteralPath $backup -Force
-            }
-            if (Test-Path -LiteralPath $Target) {
-                Move-Item -LiteralPath $Target -Destination $backup -Force
-            }
-            Move-Item -LiteralPath $Source -Destination $Target -Force
-            $swapped = $true
-            Start-Process -FilePath $Target
-            if (Test-Path -LiteralPath $backup) {
-                Remove-Item -LiteralPath $backup -Force
-            }
-            exit 0
-        } catch {
-            if ($swapped -and (Test-Path -LiteralPath $Target)) {
-                Move-Item -LiteralPath $Target -Destination $Source -Force
-            }
-            if (-not (Test-Path -LiteralPath $Target) -and
-                    (Test-Path -LiteralPath $backup)) {
-                Move-Item -LiteralPath $backup -Destination $Target -Force
-            }
-            Start-Sleep -Milliseconds 500
-        }
-    }
-    exit 1
-} finally {
-    Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
-}
-'''
+    expected_sha256 = str(expected_sha256).lower()
+    if file_sha256(staged_path) != expected_sha256:
+        raise UpdateError("The update no longer matches its verified SHA-256.")
     try:
-        with open(script, "w", encoding="utf-8-sig", newline="\r\n") as handle:
-            handle.write(script_body)
         creation_flags = (
             getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
             | getattr(subprocess, "DETACHED_PROCESS", 0)
-            | getattr(subprocess, "CREATE_NO_WINDOW", 0)
         )
+        args = [staged_path, "--install-update", "--target", target_path,
+                "--wait-pid", str(process_id or os.getpid()),
+                "--expected-sha256", expected_sha256]
+        if version:
+            args += ["--version", str(version)]
         return subprocess.Popen(
-            ["powershell.exe", "-NoProfile", "-NonInteractive",
-             "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass",
-             "-File", script,
-             "-AppProcessId", str(process_id or os.getpid()),
-             "-Source", staged_path, "-Target", target_path],
+            args,
+            cwd=os.path.dirname(target_path),
             close_fds=True,
             creationflags=creation_flags,
         )
     except Exception as exc:
-        try:
-            os.remove(script)
-        except OSError:
-            pass
         raise UpdateError(f"Could not start the update installer: {exc}") from exc
