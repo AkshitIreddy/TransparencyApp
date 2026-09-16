@@ -6,8 +6,10 @@ from transparency_app.tray import Tray
 class FakeController:
     def __init__(self):
         self.engine = SimpleNamespace(paused=False, focus_mode=False)
+        self.dimmer = SimpleNamespace(enabled=False)
         self.update_state = "idle"
         self.install_requests = 0
+        self.dimmer_toggles = 0
 
     def show_window(self):
         pass
@@ -17,6 +19,10 @@ class FakeController:
 
     def toggle_focus(self):
         pass
+
+    def toggle_dimmer(self):
+        self.dimmer_toggles += 1
+        self.dimmer.enabled = not self.dimmer.enabled
 
     def restore_all(self):
         pass
@@ -47,6 +53,28 @@ def test_ready_update_is_available_from_tray_menu():
     controller.update_state = "ready"
     assert "Install downloaded update" in {
         item.text for item in tray._menu().items}
+
+
+def test_screen_dimmer_toggle_is_available_from_tray_menu():
+    controller = FakeController()
+    tray = Tray(controller)
+    texts = {item.text for item in tray._menu().items}
+    assert "Screen dimmer" in texts
+
+    menu = tray._menu()
+    dimmer_item = next(i for i in menu.items if i.text == "Screen dimmer")
+    assert dimmer_item.checked is False
+
+    controller.dimmer.enabled = True
+    assert tray._menu() is not None
+    menu = tray._menu()
+    dimmer_item = next(i for i in menu.items if i.text == "Screen dimmer")
+    assert dimmer_item.checked is True
+
+    # Activating the menu item toggles the same global dimmer setting.
+    dimmer_item(None)
+    assert controller.dimmer_toggles == 1
+    assert controller.dimmer.enabled is False
 
 
 def test_verified_update_uses_native_desktop_notification():

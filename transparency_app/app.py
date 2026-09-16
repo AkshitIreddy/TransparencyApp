@@ -41,7 +41,7 @@ class AppController:
 
         self.config = ConfigManager(paths.config_path())
         self.engine = TransparencyEngine(self.config, ledger_path=paths.ledger_path())
-        self.dimmer = ScreenDimmer()
+        self.dimmer = ScreenDimmer(output_ledger_path=paths.gamma_ledger_path())
         self.dimmer.set_intensity(self.config.get_setting("dimmer_intensity", 160))
         self.dimmer.set_intensities(
             self.config.get_setting("dimmer_intensities", {}))
@@ -231,12 +231,30 @@ class AppController:
     # -- dimmer ---------------------------------------------------------------
 
     def set_dimmer_enabled(self, enabled):
+        enabled = bool(enabled)
         self.dimmer.set_enabled(enabled)
-        self.config.set_setting("dimmer_enabled", bool(enabled))
+        self.config.set_setting("dimmer_enabled", enabled)
         if enabled:
             self._schedule_dimmer_tick()
         else:
             self._cancel_dimmer_tick()
+        self._refresh_indicators()
+        if self.window is not None:
+            try:
+                self.window.set_dimmer_state(enabled)
+            except Exception:
+                pass
+
+    def toggle_dimmer(self):
+        """Toggle global screen dimming (tray menu entry point).
+
+        The dimmer owns HWNDs pumped by Tk's mainloop, so the actual switch
+        always runs on the UI thread. Safe to call from the tray thread.
+        """
+        self._ui(self._toggle_dimmer_impl)
+
+    def _toggle_dimmer_impl(self):
+        self.set_dimmer_enabled(not self.dimmer.enabled)
 
     def set_dimmer_intensity(self, value):
         self.dimmer.set_intensity(value)
@@ -254,6 +272,7 @@ class AppController:
         """Re-enable the dimmer saved from last session (UI thread only)."""
         self.dimmer.set_enabled(True)
         self._schedule_dimmer_tick()
+        self._refresh_indicators()
         if self.window:
             self.window.set_dimmer_state(True)
 
@@ -408,7 +427,9 @@ class AppController:
             return
         try:
             updater.launch_installer(
-                self._staged_update, os.path.abspath(sys.executable))
+                self._staged_update, os.path.abspath(sys.executable),
+                self._update_info.sha256,
+                version=getattr(self._update_info, "version", ""))
         except updater.UpdateError as exc:
             self._set_update_state("error", str(exc))
             return

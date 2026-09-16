@@ -29,18 +29,21 @@ class Tray:
         self._thread = None
 
     def _menu(self):
-        paused = self.controller.engine.paused
-        focus = self.controller.engine.focus_mode
         items = [
             pystray.MenuItem("Show window", lambda: self.controller.show_window(),
                              default=True),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(
                 "Transparency active", lambda: self.controller.toggle_paused(),
-                checked=lambda _i: not paused),
+                checked=lambda _i: not self.controller.engine.paused),
             pystray.MenuItem(
                 "Focus mode", lambda: self.controller.toggle_focus(),
-                checked=lambda _i: focus),
+                checked=lambda _i: bool(self.controller.engine.focus_mode)),
+            pystray.MenuItem(
+                "Screen dimmer", lambda: self.controller.toggle_dimmer(),
+                checked=lambda _i: bool(getattr(
+                    getattr(self.controller, "dimmer", None),
+                    "enabled", False))),
             pystray.MenuItem("Restore all windows",
                              lambda: self.controller.restore_all()),
         ]
