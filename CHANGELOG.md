@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project uses
 [semantic versioning](https://semver.org/).
 
+## [2.3.0] — 2026-09-16
+
+### Added
+- **Global screen-dimming toggle in the tray menu** — turn dimming for all
+  windows on/off straight from the taskbar context menu, mirroring the
+  Screen dimmer switch in the app. The tray checkmark, app switch and saved
+  `dimmer_enabled` setting stay in sync.
+- **Verified output dimming backend** — per-display gamma ramps dim the final
+  monitor output (including Start/taskbar) with read-back verification and a
+  crash-recovery ledger; unsupported drivers fall back to the overlay, capped
+  so deep requests keep working.
+
+### Changed
+- **Branded update experience** — the in-app update prompt is now a themed
+  CustomTkinter dialog (accent, dark/light mode, app icon) and the replacement
+  step runs in a branded "Update Transparency App" window showing the target
+  version, SHA-256 verification and rollback status.
+- **App-specific executable identity** — `TransparencyApp.exe` now carries
+  product name, description and version metadata plus the app icon, so
+  Explorer, Task Manager and installer dialogs identify it correctly.
+
 ## [2.2.4] — 2026-08-21
 
 ### Fixed
